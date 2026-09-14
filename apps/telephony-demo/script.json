@@ -1,0 +1,73 @@
+{
+  "title": "Clinic visit: chest pain (synthetic)",
+  "clinicianLanguageId": "en-US",
+  "patientLanguageId": "es-US",
+  "lines": [
+    {
+      "id": "01-clinician-greeting",
+      "speaker": "clinician",
+      "says": "Hello, I'm Doctor Rivera. What brings you in today?",
+      "translation": "Hola, soy el doctor Rivera. ¿Qué lo trae por aquí hoy?"
+    },
+    {
+      "id": "02-patient-chest-pain",
+      "speaker": "patient",
+      "says": "Tengo dolor en el pecho desde hace dos días.",
+      "translation": "I have had chest pain for two days."
+    },
+    {
+      "id": "03-clinician-which-side",
+      "speaker": "clinician",
+      "says": "Is the pain on the left side or the right side?",
+      "translation": "¿El dolor está en el lado izquierdo o en el lado derecho?"
+    },
+    {
+      "id": "04-patient-left-side",
+      "speaker": "patient",
+      "says": "En el lado izquierdo. No me duele el brazo.",
+      "translation": "On the left side. My arm does not hurt."
+    },
+    {
+      "id": "05-clinician-allergies",
+      "speaker": "clinician",
+      "says": "Are you allergic to any medication?",
+      "translation": "¿Es alérgico a algún medicamento?"
+    },
+    {
+      "id": "06-patient-penicillin",
+      "speaker": "patient",
+      "says": "Sí, soy alérgico a la penicilina.",
+      "translation": "Yes, I am allergic to penicillin."
+    },
+    {
+      "id": "07-clinician-dose-blocked",
+      "speaker": "clinician",
+      "says": "Take 500 milligrams of acetaminophen every 8 hours for the pain.",
+      "translation": "Tome 50 miligramos de acetaminofén cada 8 horas para el dolor.",
+      "gate": {
+        "status": "FAIL",
+        "reasons": [
+          "Dosage changed: 500 mg in the source, 50 mg in the translation"
+        ]
+      }
+    },
+    {
+      "id": "08-clinician-dose-repeated",
+      "speaker": "clinician",
+      "says": "Take 500 milligrams of acetaminophen every 8 hours for the pain.",
+      "translation": "Tome 500 miligramos de acetaminofén cada 8 horas para el dolor."
+    },
+    {
+      "id": "09-patient-come-back",
+      "speaker": "patient",
+      "says": "Entendido. ¿Tengo que volver mañana?",
+      "translation": "Understood. Do I need to come back tomorrow?"
+    },
+    {
+      "id": "10-clinician-follow-up",
+      "speaker": "clinician",
+      "says": "Yes. Come back tomorrow morning, and call 911 if the pain gets worse.",
+      "translation": "Sí. Regrese mañana por la mañana y llame al 911 si el dolor empeora."
+    }
+  ]
+}

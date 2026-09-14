@@ -1,0 +1,41 @@
+{
+  "name": "fourpoints-telephony-staging",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Staging workspace for @fourpoints/telephony. Mirrors the FourPoints monorepo layout so apps/telephony moves in unchanged.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "start:telephony": "node apps/telephony/dist/index.js",
+    "start:telephony:local": "node --env-file=apps/telephony/.env apps/telephony/dist/index.js",
+    "call:fake": "node apps/telephony/dist/fake-twilio-call.js",
+    "demo": "node apps/telephony-demo/dist/index.js",
+    "demo:check": "node apps/telephony-demo/dist/self-test.js",
+    "demo:stand-in": "node apps/telephony-demo/dist/index.js --stand-in-only",
+    "demo:placeholders": "powershell -NoProfile -ExecutionPolicy Bypass -File apps/telephony-demo/scripts/make-placeholders.ps1",
+    "check:protocol-sync": "node scripts/check-protocol-sync.mjs",
+    "clean": "tsc -b --clean",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.19.0",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "dist/.tsbuildinfo.build"
+  },
+  // `references` is NOT inherited through `extends` (same note as
+  // apps/realtime/tsconfig.build.json).
+  "references": [{ "path": "../../packages/protocol" }],
+  "exclude": ["src/**/*.test.ts", "src/fake-twilio-call.ts"]
+}

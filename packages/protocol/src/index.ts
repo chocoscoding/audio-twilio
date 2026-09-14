@@ -1,0 +1,62 @@
+export {
+  PROTOCOL_VERSION,
+  type ClientMessage,
+  type ConversationEndMessage,
+  type ConversationLanguagesMessage,
+  type ConversationReadyMessage,
+  type ConversationStartMessage,
+  type ConversationState,
+  type ErrorCategory,
+  type ErrorMessage,
+  type LanguageChangeMessage,
+  type LanguagesAvailableMessage,
+  type ListeningMessage,
+  type MetricsTurnMessage,
+  type QualityOutcome,
+  type QualityResultMessage,
+  type ReconnectingMessage,
+  type ServerMessage,
+  type SessionEndMessage,
+  type SessionReadyMessage,
+  type SessionStartMessage,
+  type TranscriptFinalMessage,
+  type TranscriptPartialMessage,
+  type TranslationFinalMessage,
+  type TranslationStartedMessage,
+  type TtsEndedMessage,
+  type TtsStartedMessage,
+  type TurnEndMessage,
+  type TurnStartMessage,
+  type WarningMessage,
+  type WireAudioFormat,
+  type WireCapabilityTier,
+  type WireLanguageCapability,
+  type WireValidationStatus,
+} from './messages.js';
+
+export type {
+  AudioFrameStats,
+  TurnLatencies,
+  TurnMetrics,
+  TurnTimestamps,
+} from './metrics.js';
+
+export {
+  AUDIO_FRAME_HEADER_BYTES,
+  AUDIO_FRAME_LAYOUT_VERSION,
+  AUDIO_FRAME_TYPE_PCM16,
+  AUDIO_FRAME_TYPE_TTS_PCM16,
+  decodeAudioFrame,
+  decodeTtsAudioFrame,
+  encodeAudioFrame,
+  encodeTtsAudioFrame,
+  type AudioFrame,
+  type TtsAudioFrame,
+} from './audio-frame.js';
+
+export {
+  isClientMessage,
+  isServerMessage,
+  parseClientMessage,
+  parseServerMessage,
+} from './guards.js';

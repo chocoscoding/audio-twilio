@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/protocol" },
+    { "path": "apps/telephony" },
+    { "path": "apps/telephony-demo" }
+  ]
+}

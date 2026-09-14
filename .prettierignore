@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+package-lock.json
+
+# Authoritative architecture specification — content is not reformatted.
+docs/architecture/demo-build-spec.md

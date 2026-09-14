@@ -1,0 +1,1275 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>FourPoints Phone Line Demo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Sora:wght@500;600&display=swap"
+    />
+    <style>
+      /* FourPoints tokens (apps/web/src/styles/app.css). Light only, like the app. */
+      :root {
+        --navy: #0e2a5c;
+        --navy-deep: #0a1f45;
+        --teal: #0e7489;
+        --teal-bright: #1591b4;
+        --teal-soft: #e6f3f7;
+        --green: #5cc22b;
+        --green-deep: #3f8a1c;
+        --green-soft: #eefae6;
+        --text: #16324f;
+        --muted: #55707f;
+        --faint: #8497a3;
+        --canvas: #eef1f4;
+        --surface: #ffffff;
+        --surface-soft: #f6f8fa;
+        --border: #e3e9ee;
+        --border-strong: #d3dce3;
+        --danger: #c9302d;
+        --danger-text: #8f2220;
+        --danger-soft: #fdf3f2;
+        --danger-border: #f2ccca;
+        --warning: #8a5906;
+        --warning-soft: #fdf7ec;
+        --radius: 0.75rem;
+        --shadow:
+          0 1px 2px rgba(14, 42, 92, 0.04),
+          0 18px 44px -30px rgba(14, 42, 92, 0.3);
+        --font-display:
+          'Sora', 'Inter', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+        --font-sans:
+          'Inter', ui-sans-serif, system-ui, 'Segoe UI', Roboto, Arial,
+          sans-serif;
+        --font-mono:
+          ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono',
+          monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--canvas);
+        color: var(--text);
+        font: 15px/1.5 var(--font-sans);
+      }
+      button {
+        font: inherit;
+        color: inherit;
+      }
+      button:focus-visible {
+        outline: 3px solid var(--teal-bright);
+        outline-offset: 2px;
+      }
+
+      header {
+        background: var(--navy-deep);
+        color: #fff;
+        padding: 0.9rem 1.5rem;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.75rem 1.5rem;
+      }
+      .brand {
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-size: 1.05rem;
+        letter-spacing: 0.01em;
+      }
+      .brand span {
+        color: #9fd4e3;
+        font-weight: 500;
+      }
+      .honesty {
+        margin-left: auto;
+        font-size: 0.8rem;
+        padding: 0.3rem 0.7rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.1);
+        color: #dce8f0;
+      }
+
+      /* The live chain: which hop is talking right now. */
+      .chain {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.75rem 1.5rem;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        overflow-x: auto;
+        font-size: 0.82rem;
+      }
+      .hop {
+        white-space: nowrap;
+        padding: 0.35rem 0.7rem;
+        border-radius: 999px;
+        border: 1px solid var(--border-strong);
+        color: var(--muted);
+        transition:
+          background 0.25s,
+          color 0.25s,
+          border-color 0.25s;
+      }
+      .hop strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .hop.stub {
+        border-style: dashed;
+      }
+      .hop.lit {
+        background: var(--teal-soft);
+        border-color: var(--teal);
+        color: var(--teal);
+      }
+      .link {
+        color: var(--faint);
+        white-space: nowrap;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: 20rem minmax(0, 1fr) 22rem;
+        gap: 1.25rem;
+        padding: 1.25rem 1.5rem 2rem;
+        align-items: start;
+      }
+      @media (max-width: 1180px) {
+        main {
+          grid-template-columns: 20rem minmax(0, 1fr);
+        }
+        .wire {
+          grid-column: 1 / -1;
+        }
+      }
+      @media (max-width: 760px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+      }
+      .panel h2 {
+        margin: 0;
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-size: 0.78rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      /* Phone */
+      .phone {
+        background: var(--navy);
+        border: 0;
+        padding: 1rem;
+        color: #fff;
+        display: grid;
+        gap: 0.9rem;
+      }
+      .screen {
+        background: var(--navy-deep);
+        border-radius: 0.6rem;
+        padding: 0.9rem 1rem;
+        min-height: 9.5rem;
+        display: grid;
+        align-content: start;
+        gap: 0.35rem;
+      }
+      .screen .state {
+        font-family: var(--font-display);
+        font-size: 1.15rem;
+        font-weight: 600;
+      }
+      .screen .detail {
+        color: #b9cfdd;
+        font-size: 0.85rem;
+        font-variant-numeric: tabular-nums;
+      }
+      .screen .caption {
+        color: #ffffff;
+        font-size: 0.88rem;
+        line-height: 1.45;
+        border-left: 2px solid var(--teal-bright);
+        padding-left: 0.6rem;
+        margin-top: 0.35rem;
+      }
+      .screen .caption:empty {
+        display: none;
+      }
+      .meter {
+        height: 4px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.12);
+        overflow: hidden;
+      }
+      .meter i {
+        display: block;
+        height: 100%;
+        width: 0;
+        background: var(--green);
+        transition: width 80ms linear;
+      }
+      .keypad {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.5rem;
+      }
+      .keypad button {
+        height: 3rem;
+        border: 0;
+        border-radius: 0.55rem;
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+        font-family: var(--font-display);
+        font-size: 1.2rem;
+        cursor: pointer;
+      }
+      .keypad button:hover {
+        background: rgba(255, 255, 255, 0.18);
+      }
+      .keypad button:active {
+        background: var(--teal);
+      }
+      .keypad button small {
+        display: block;
+        font: 500 0.6rem/1 var(--font-sans);
+        letter-spacing: 0.08em;
+        color: #9fb6c6;
+      }
+      .call-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+      }
+      .call-row button,
+      .dial button {
+        height: 2.9rem;
+        border: 0;
+        border-radius: 999px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #call {
+        background: var(--green);
+        color: var(--navy-deep);
+      }
+      #hangup {
+        background: var(--danger);
+        color: #fff;
+      }
+      .call-row button:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+      .dial {
+        display: grid;
+        gap: 0.5rem;
+      }
+      .dial button {
+        background: #fff;
+        color: var(--navy);
+      }
+      .dial button.secondary {
+        background: transparent;
+        color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.35);
+      }
+      .phone .hint {
+        font-size: 0.78rem;
+        color: #9fb6c6;
+        margin: 0;
+      }
+
+      /* Conversation */
+      .conversation {
+        padding: 1.1rem 1.25rem 1.25rem;
+        display: grid;
+        gap: 1rem;
+      }
+      .next {
+        background: var(--teal-soft);
+        border-radius: 0.6rem;
+        padding: 0.85rem 1rem;
+        display: grid;
+        gap: 0.2rem;
+      }
+      .next .who {
+        font-size: 0.75rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--teal);
+        font-weight: 600;
+      }
+      .next .line {
+        font-family: var(--font-display);
+        font-size: 1.2rem;
+        line-height: 1.35;
+        color: var(--navy);
+        text-wrap: balance;
+      }
+      .next .note {
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+      .turns {
+        display: grid;
+        gap: 0.75rem;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .turns:empty::before {
+        content: 'Place the call, press 1 for the AI interpreter and 1 for Spanish, then read the line above after the low tone.';
+        color: var(--faint);
+        font-size: 0.9rem;
+      }
+      .turn {
+        border: 1px solid var(--border);
+        border-radius: 0.6rem;
+        padding: 0.8rem 1rem;
+        display: grid;
+        gap: 0.35rem;
+      }
+      .turn.patient {
+        background: var(--surface-soft);
+      }
+      .turn .meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.78rem;
+        color: var(--muted);
+      }
+      .turn .role {
+        font-weight: 600;
+        color: var(--text);
+      }
+      .turn .said {
+        color: var(--muted);
+      }
+      .turn .translation {
+        font-size: 1.02rem;
+        color: var(--navy);
+        font-weight: 500;
+      }
+      .pill {
+        margin-left: auto;
+        font-size: 0.72rem;
+        font-weight: 600;
+        padding: 0.15rem 0.55rem;
+        border-radius: 999px;
+        border: 1px solid var(--border-strong);
+        color: var(--muted);
+      }
+      .pill.spoken {
+        background: var(--green-soft);
+        border-color: #cfe9bf;
+        color: var(--green-deep);
+      }
+      .pill.blocked {
+        background: var(--danger-soft);
+        border-color: var(--danger-border);
+        color: var(--danger-text);
+      }
+      .turn .reason {
+        font-size: 0.82rem;
+        color: var(--danger-text);
+      }
+      .listening {
+        font-size: 0.85rem;
+        color: var(--teal);
+        min-height: 1.3em;
+      }
+
+      /* Wire log */
+      .wire {
+        padding: 1.1rem 0 0.5rem;
+        display: grid;
+        gap: 0.6rem;
+      }
+      .wire h2,
+      .wire p {
+        padding: 0 1.1rem;
+      }
+      .wire p {
+        margin: 0;
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+      .log {
+        list-style: none;
+        margin: 0;
+        padding: 0 0.6rem;
+        max-height: 34rem;
+        overflow-y: auto;
+        font: 0.74rem/1.45 var(--font-mono);
+      }
+      .log li {
+        display: grid;
+        grid-template-columns: 3.6rem 5.4rem minmax(0, 1fr);
+        gap: 0.4rem;
+        padding: 0.28rem 0.5rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .log time {
+        color: var(--faint);
+        font-variant-numeric: tabular-nums;
+      }
+      .log b {
+        font-weight: 600;
+      }
+      .log .twilio b {
+        color: #b3261e;
+      }
+      .log .gateway b {
+        color: var(--teal);
+      }
+      .log .fourpoints b {
+        color: var(--navy);
+      }
+      .log .phone b {
+        color: var(--green-deep);
+      }
+      .log span {
+        overflow-wrap: anywhere;
+      }
+
+      footer {
+        padding: 0 1.5rem 1.5rem;
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .hop,
+        .meter i {
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">FourPoints <span>Phone line demo</span></div>
+      <div class="honesty">
+        Scripted stand-in: FourPoints is not connected. Synthetic scenario, no
+        patient data.
+      </div>
+    </header>
+
+    <nav class="chain" aria-label="Call path">
+      <span class="hop" data-hop="phone"
+        ><strong>Browser phone</strong> caller</span
+      >
+      <span class="link">μ-law 8 kHz →</span>
+      <span class="hop stub" data-hop="twilio"
+        ><strong>Twilio emulator</strong> signs requests</span
+      >
+      <span class="link">webhooks + /media →</span>
+      <span class="hop" data-hop="gateway"
+        ><strong>Telephony gateway</strong> unchanged build</span
+      >
+      <span class="link">protocol v1 →</span>
+      <span class="hop stub" data-hop="fourpoints"
+        ><strong>FourPoints stand-in</strong> scripted</span
+      >
+    </nav>
+
+    <main>
+      <section class="panel phone" aria-label="Phone">
+        <div class="screen" aria-live="polite">
+          <div class="state" id="state">Ready to call</div>
+          <div class="detail" id="detail"></div>
+          <div class="caption" id="caption"></div>
+        </div>
+        <div class="meter" title="Microphone level"><i id="meter"></i></div>
+        <div class="keypad" id="keypad"></div>
+        <div class="dial" id="dial" hidden></div>
+        <div class="call-row">
+          <button id="call" type="button">Call</button>
+          <button id="hangup" type="button" disabled>Hang up</button>
+        </div>
+        <p class="hint">
+          Low tone: clinician speaks. High tone: patient speaks. Double beep:
+          repeat. ✱ switches speaker.
+        </p>
+      </section>
+
+      <section class="panel conversation" aria-label="Conversation">
+        <h2>Conversation</h2>
+        <div class="next" id="next">
+          <div class="who" id="next-who">Clinician speaks next</div>
+          <div class="line" id="next-line"></div>
+          <div class="note" id="next-note"></div>
+        </div>
+        <div class="listening" id="listening" aria-live="polite"></div>
+        <ol class="turns" id="turns"></ol>
+      </section>
+
+      <section class="panel wire" aria-label="Behind the scenes">
+        <h2>On the wire</h2>
+        <p>
+          Every hop, in order: Twilio webhooks and stream, the gateway's own
+          logs, and FourPoints protocol messages.
+        </p>
+        <ol class="log" id="log"></ol>
+      </section>
+    </main>
+
+    <footer id="footer"></footer>
+
+    <script type="module">
+      const $ = (id) => document.getElementById(id);
+      const demo = await (await fetch('/demo.json')).json();
+      const lines = demo.script.lines;
+      const LANGUAGE_NAMES = { 'en-US': 'English', 'es-US': 'Spanish' };
+      const languageOf = (speaker) =>
+        speaker === 'clinician'
+          ? demo.script.clinicianLanguageId
+          : demo.script.patientLanguageId;
+      const roleName = (speaker) =>
+        speaker === 'clinician' ? 'Clinician' : 'Patient';
+      const other = (speaker) =>
+        speaker === 'clinician' ? 'patient' : 'clinician';
+      const randomHex = (n) =>
+        Array.from(crypto.getRandomValues(new Uint8Array(n / 2)), (b) =>
+          b.toString(16).padStart(2, '0'),
+        ).join('');
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      // ---------------------------------------------------------------- log
+      let clockStart = performance.now();
+      function log(hop, text) {
+        const li = document.createElement('li');
+        li.className = hop;
+        const seconds = ((performance.now() - clockStart) / 1000).toFixed(1);
+        li.innerHTML = `<time>${seconds}s</time><b>${hop.toUpperCase()}</b><span></span>`;
+        li.querySelector('span').textContent = text;
+        const list = $('log');
+        list.append(li);
+        while (list.children.length > 250) list.firstChild.remove();
+        list.scrollTop = list.scrollHeight;
+        pulse(hop);
+      }
+      function pulse(hop) {
+        const el = document.querySelector(`[data-hop="${hop}"]`);
+        if (!el) return;
+        el.classList.add('lit');
+        clearTimeout(el.dataset.timer);
+        el.dataset.timer = setTimeout(() => el.classList.remove('lit'), 600);
+      }
+
+      // --------------------------------------------------------------- μ-law
+      const MULAW_TO_FLOAT = new Float32Array(256).map((_, byte) => {
+        const u = ~byte & 0xff;
+        const exponent = (u >> 4) & 7;
+        const magnitude = (((u & 0x0f) << 3) + 0x84) << exponent;
+        return (u & 0x80 ? 0x84 - magnitude : magnitude - 0x84) / 32768;
+      });
+      function linearToMulaw(sample) {
+        const sign = sample < 0 ? 0x80 : 0;
+        const s = Math.min(Math.abs(sample), 32635) + 0x84;
+        let exponent = 7;
+        for (let mask = 0x4000; (s & mask) === 0 && exponent > 0; mask >>= 1)
+          exponent--;
+        return (
+          ~(sign | (exponent << 4) | ((s >> (exponent + 3)) & 0x0f)) & 0xff
+        );
+      }
+      const toBase64 = (bytes) => btoa(String.fromCharCode(...bytes));
+      const fromBase64 = (text) =>
+        Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+
+      /** Microphone (e.g. 48 kHz float) → 8 kHz μ-law frames of 160 bytes, as Twilio sends. */
+      class MulawEncoder {
+        constructor(rateHz) {
+          this.step = rateHz / 8000;
+          this.position = 0;
+          this.sum = 0;
+          this.count = 0;
+          this.frame = new Uint8Array(160);
+          this.length = 0;
+        }
+        push(input) {
+          const frames = [];
+          for (let i = 0; i < input.length; i++) {
+            this.sum += input[i];
+            this.count += 1;
+            this.position += 1;
+            if (this.position < this.step) continue;
+            this.position -= this.step;
+            const value = Math.max(-1, Math.min(1, this.sum / this.count));
+            this.sum = 0;
+            this.count = 0;
+            this.frame[this.length++] = linearToMulaw(
+              Math.round(value * 32767),
+            );
+            if (this.length === 160) {
+              frames.push(this.frame);
+              this.frame = new Uint8Array(160);
+              this.length = 0;
+            }
+          }
+          return frames;
+        }
+      }
+
+      // ---------------------------------------------------------------- audio
+      let audio = null;
+      async function ensureAudio() {
+        if (audio) return audio;
+        const ctx = new AudioContext();
+        const mic = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+          },
+        });
+        const processor = `class Tap extends AudioWorkletProcessor {
+          process(inputs) { const c = inputs[0] && inputs[0][0]; if (c) this.port.postMessage(c.slice(0)); return true; }
+        } registerProcessor('tap', Tap);`;
+        await ctx.audioWorklet.addModule(
+          URL.createObjectURL(
+            new Blob([processor], { type: 'text/javascript' }),
+          ),
+        );
+        const tap = new AudioWorkletNode(ctx, 'tap');
+        const silent = ctx.createGain();
+        silent.gain.value = 0;
+        ctx
+          .createMediaStreamSource(mic)
+          .connect(tap)
+          .connect(silent)
+          .connect(ctx.destination);
+        const encoder = new MulawEncoder(ctx.sampleRate);
+        let level = 0;
+        tap.port.onmessage = ({ data }) => {
+          let sum = 0;
+          for (const v of data) sum += v * v;
+          level = Math.max(level * 0.85, Math.sqrt(sum / data.length));
+          $('meter').style.width = `${Math.min(100, level * 400)}%`;
+          if (call.stream)
+            for (const frame of encoder.push(data)) sendMedia(frame);
+        };
+        audio = { ctx, cursor: 0, sources: new Set() };
+        return audio;
+      }
+
+      function playMulaw(bytes) {
+        const { ctx } = audio;
+        const buffer = ctx.createBuffer(1, bytes.length, 8000);
+        const channel = buffer.getChannelData(0);
+        for (let i = 0; i < bytes.length; i++)
+          channel[i] = MULAW_TO_FLOAT[bytes[i]];
+        const node = ctx.createBufferSource();
+        node.buffer = buffer;
+        node.connect(ctx.destination);
+        const at = Math.max(ctx.currentTime + 0.04, audio.cursor);
+        node.start(at);
+        audio.cursor = at + buffer.duration;
+        audio.sources.add(node);
+        node.onended = () => audio.sources.delete(node);
+      }
+      function stopPlayback() {
+        for (const node of audio?.sources ?? []) node.stop();
+        if (audio) audio.cursor = 0;
+      }
+      function keyTone(key) {
+        if (!audio) return;
+        const pairs = {
+          1: [697, 1209],
+          2: [697, 1336],
+          3: [697, 1477],
+          4: [770, 1209],
+          5: [770, 1336],
+          6: [770, 1477],
+          7: [852, 1209],
+          8: [852, 1336],
+          9: [852, 1477],
+          '*': [941, 1209],
+          0: [941, 1336],
+          '#': [941, 1477],
+        };
+        const { ctx } = audio;
+        const gain = ctx.createGain();
+        gain.gain.value = 0.06;
+        gain.connect(ctx.destination);
+        for (const hz of pairs[key]) {
+          const osc = ctx.createOscillator();
+          osc.frequency.value = hz;
+          osc.connect(gain);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.12);
+        }
+      }
+
+      // ----------------------------------------------------------- the call
+      let call = { active: false };
+      const setScreen = (state, detail = '') => {
+        $('state').textContent = state;
+        $('detail').textContent = detail;
+      };
+      const caption = (text) => ($('caption').textContent = text);
+
+      async function webhook(url, params = {}) {
+        const path = new URL(url).pathname;
+        log(
+          'twilio',
+          `POST ${path}${params.Digits ? ` Digits=${params.Digits}` : ''}`,
+        );
+        const res = await fetch('/twilio/webhook', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ url, callSid: call.sid, params }),
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(`${path} answered ${res.status}: ${text}`);
+        return text;
+      }
+
+      function say(text) {
+        caption(text);
+        return new Promise((resolve) => {
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = 'en-US';
+          utterance.rate = 1.05;
+          const done = () => {
+            clearTimeout(fallback);
+            resolve();
+          };
+          const fallback = setTimeout(done, 1500 + text.length * 90); // some browsers skip onend
+          utterance.onend = done;
+          utterance.onerror = done;
+          speechSynthesis.speak(utterance);
+        });
+      }
+
+      function gather(verb) {
+        const numDigits = Number(verb.getAttribute('numDigits')) || Infinity;
+        const finishOnKey = verb.getAttribute('finishOnKey') ?? '#';
+        const timeoutMs = (Number(verb.getAttribute('timeout')) || 5) * 1000;
+        return new Promise((resolve) => {
+          let digits = '';
+          let timer;
+          let done = false;
+          const finish = () => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            call.onKey = null;
+            call.cancel = null;
+            speechSynthesis.cancel();
+            resolve(digits === '' ? null : digits);
+          };
+          const arm = () => {
+            clearTimeout(timer);
+            timer = setTimeout(finish, timeoutMs);
+          };
+          call.cancel = finish;
+          call.onKey = (key) => {
+            speechSynthesis.cancel();
+            if (key === finishOnKey) return finish();
+            digits += key;
+            $('detail').textContent = `Entered ${digits}`;
+            if (digits.length >= numDigits) return finish();
+            arm();
+          };
+          (async () => {
+            for (const child of verb.children) {
+              if (done || digits !== '') break;
+              if (child.nodeName === 'Say') await say(child.textContent);
+            }
+            if (!done && digits === '') arm();
+          })();
+        });
+      }
+
+      function connectStream(streamEl) {
+        const target = streamEl.getAttribute('url');
+        const customParameters = Object.fromEntries(
+          [...streamEl.querySelectorAll('Parameter')].map((p) => [
+            p.getAttribute('name'),
+            p.getAttribute('value'),
+          ]),
+        );
+        const patient = customParameters.patientLanguageId;
+        return new Promise((resolve) => {
+          const ws = new WebSocket(
+            `${location.origin.replace(/^http/, 'ws')}/twilio/media?url=${encodeURIComponent(target)}`,
+          );
+          call.stream = {
+            ws,
+            sid: `MZ${randomHex(32)}`,
+            sequence: 0,
+            chunk: 0,
+            startedAt: performance.now(),
+          };
+          call.cancel = () => {
+            streamSend({
+              event: 'stop',
+              stop: { accountSid: demo.accountSid, callSid: call.sid },
+            });
+            ws.close();
+          };
+          ws.onopen = () => {
+            streamSend({
+              event: 'connected',
+              protocol: 'Call',
+              version: '1.0.0',
+            });
+            streamSend({
+              event: 'start',
+              start: {
+                accountSid: demo.accountSid,
+                streamSid: call.stream.sid,
+                callSid: call.sid,
+                tracks: ['inbound'],
+                mediaFormat: {
+                  encoding: 'audio/x-mulaw',
+                  sampleRate: 8000,
+                  channels: 1,
+                },
+                customParameters,
+              },
+            });
+            caption('');
+            setScreen(
+              'AI interpreter',
+              `${LANGUAGE_NAMES[patient] ?? patient} · speak after the tone`,
+            );
+            log(
+              'twilio',
+              `Media stream opened to ${new URL(target).pathname} (signed handshake)`,
+            );
+          };
+          ws.onmessage = ({ data }) => {
+            const message = JSON.parse(data);
+            if (message.event === 'media') {
+              playMulaw(fromBase64(message.media.payload));
+            } else if (message.event === 'mark') {
+              // Twilio echoes a mark once the audio queued before it has played.
+              const delay = Math.max(
+                0,
+                (audio.cursor - audio.ctx.currentTime) * 1000,
+              );
+              setTimeout(
+                () =>
+                  streamSend({
+                    event: 'mark',
+                    mark: { name: message.mark.name },
+                  }),
+                delay,
+              );
+            } else if (message.event === 'clear') {
+              stopPlayback();
+            }
+          };
+          ws.onclose = () => {
+            log('twilio', 'Media stream closed');
+            call.stream = null;
+            call.cancel = null;
+            resolve();
+          };
+        });
+      }
+
+      function streamSend(message) {
+        const stream = call.stream;
+        if (!stream || stream.ws.readyState !== WebSocket.OPEN) return;
+        if (message.event !== 'connected') {
+          message.sequenceNumber = String(++stream.sequence);
+          message.streamSid = stream.sid;
+        }
+        stream.ws.send(JSON.stringify(message));
+      }
+      function sendMedia(frame) {
+        const stream = call.stream;
+        if (!stream) return;
+        stream.chunk += 1;
+        streamSend({
+          event: 'media',
+          media: {
+            track: 'inbound',
+            chunk: String(stream.chunk),
+            timestamp: String(Math.round(performance.now() - stream.startedAt)),
+            payload: toBase64(frame),
+          },
+        });
+      }
+
+      function dial(verb) {
+        const numbers = [...verb.querySelectorAll('Number')].map((n) =>
+          n.textContent.trim(),
+        );
+        setScreen('Ringing interpreters', numbers.join(', '));
+        log(
+          'twilio',
+          `<Dial> would ring ${numbers.join(', ')} (the demo places no real calls)`,
+        );
+        const panel = $('dial');
+        panel.hidden = false;
+        return new Promise((resolve) => {
+          const finish = (status) => {
+            panel.hidden = true;
+            panel.replaceChildren();
+            call.cancel = null;
+            resolve(status);
+          };
+          const button = (label, className, onClick) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = label;
+            if (className) b.className = className;
+            b.onclick = onClick;
+            return b;
+          };
+          call.cancel = () => finish('canceled');
+          panel.replaceChildren(
+            button('Simulate: interpreter answers', '', () => {
+              setScreen('Human interpreter', 'Connected (simulated)');
+              panel.replaceChildren(
+                button('End interpreter call', '', () => finish('completed')),
+              );
+            }),
+            button('Simulate: no answer', 'secondary', () =>
+              finish('no-answer'),
+            ),
+          );
+        });
+      }
+
+      async function runTwiml(xml) {
+        const root = new DOMParser().parseFromString(
+          xml,
+          'text/xml',
+        ).documentElement;
+        if (root.nodeName !== 'Response')
+          throw new Error('The gateway did not return TwiML');
+        for (const verb of root.children) {
+          if (!call.active) return;
+          const attrs = [...verb.attributes]
+            .filter(
+              (a) =>
+                a.name !== 'action' &&
+                a.name !== 'url' &&
+                a.name !== 'statusCallback',
+            )
+            .map((a) => ` ${a.name}="${a.value}"`)
+            .join('');
+          if (verb.nodeName !== 'Say')
+            log('twilio', `<${verb.nodeName}${attrs}>`);
+          switch (verb.nodeName) {
+            case 'Say':
+              await say(verb.textContent);
+              break;
+            case 'Pause':
+              await wait((Number(verb.getAttribute('length')) || 1) * 1000);
+              break;
+            case 'Gather': {
+              setScreen('Menu', 'Use the keypad');
+              const digits = await gather(verb);
+              if (!call.active) return;
+              if (
+                digits !== null ||
+                verb.getAttribute('actionOnEmptyResult') === 'true'
+              ) {
+                return runTwiml(
+                  await webhook(
+                    verb.getAttribute('action'),
+                    digits === null ? {} : { Digits: digits },
+                  ),
+                );
+              }
+              break;
+            }
+            case 'Redirect':
+              return runTwiml(await webhook(verb.textContent.trim()));
+            case 'Connect': {
+              const stream = verb.querySelector('Stream');
+              if (stream) await connectStream(stream);
+              if (!call.active) return;
+              const action = verb.getAttribute('action');
+              if (action)
+                return runTwiml(
+                  await webhook(action, { CallStatus: 'in-progress' }),
+                );
+              break;
+            }
+            case 'Dial': {
+              const status = await dial(verb);
+              if (!call.active) return;
+              const action = verb.getAttribute('action');
+              if (action)
+                return runTwiml(
+                  await webhook(action, { DialCallStatus: status }),
+                );
+              break;
+            }
+            case 'Hangup':
+              return endCall('The line hung up');
+            default:
+              log('twilio', `<${verb.nodeName}> is not emulated; skipped`);
+          }
+        }
+        endCall('Call completed');
+      }
+
+      async function startCall() {
+        try {
+          await ensureAudio();
+          await audio.ctx.resume();
+        } catch {
+          setScreen(
+            'Microphone needed',
+            'Allow microphone access, then call again.',
+          );
+          return;
+        }
+        clockStart = performance.now();
+        $('log').replaceChildren();
+        $('turns').replaceChildren();
+        resetScript();
+        call = {
+          active: true,
+          sid: `CA${randomHex(32)}`,
+          stream: null,
+          onKey: null,
+          cancel: null,
+        };
+        $('call').disabled = true;
+        $('hangup').disabled = false;
+        setScreen('Calling', demo.twilioNumber);
+        log('phone', `Dialing ${demo.twilioNumber}`);
+        try {
+          await runTwiml(
+            await webhook(`${demo.gatewayBaseUrl}/voice/incoming`),
+          );
+        } catch (error) {
+          if (call.active) endCall(error.message);
+        }
+      }
+
+      function endCall(reason) {
+        if (!call.active) return;
+        call.active = false;
+        speechSynthesis.cancel();
+        call.cancel?.();
+        stopPlayback();
+        caption('');
+        setScreen('Call ended', reason);
+        log('phone', `Call ended: ${reason}`);
+        $('listening').textContent = '';
+        $('call').disabled = false;
+        $('hangup').disabled = true;
+      }
+
+      // --------------------------------------------------------------- keypad
+      const KEYS = [
+        ['1', ''],
+        ['2', 'ABC'],
+        ['3', 'DEF'],
+        ['4', 'GHI'],
+        ['5', 'JKL'],
+        ['6', 'MNO'],
+        ['7', 'PQRS'],
+        ['8', 'TUV'],
+        ['9', 'WXYZ'],
+        ['*', ''],
+        ['0', '+'],
+        ['#', ''],
+      ];
+      for (const [key, letters] of KEYS) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.innerHTML = `${key === '*' ? '✱' : key}<small>${letters || '&nbsp;'}</small>`;
+        b.setAttribute('aria-label', key);
+        b.onclick = () => pressKey(key);
+        $('keypad').append(b);
+      }
+      function pressKey(key) {
+        if (!call.active) return;
+        keyTone(key);
+        if (call.onKey) {
+          call.onKey(key);
+        } else if (call.stream) {
+          streamSend({
+            event: 'dtmf',
+            dtmf: { track: 'inbound_track', digit: key },
+          });
+          log('phone', `DTMF ${key} sent on the media stream`);
+          if (key === '*') {
+            script.nextSpeaker = other(script.nextSpeaker);
+            renderNext();
+          }
+        }
+      }
+      document.addEventListener('keydown', (event) => {
+        if (/^[0-9*#]$/.test(event.key)) pressKey(event.key);
+      });
+      $('call').onclick = startCall;
+      $('hangup').onclick = () => endCall('You hung up');
+
+      // --------------------------------------------------- scripted conversation
+      const script = { cursor: 0, nextSpeaker: 'clinician', cards: new Map() };
+      function resetScript() {
+        script.cursor = 0;
+        script.nextSpeaker = 'clinician';
+        script.cards.clear();
+        renderNext();
+      }
+      function nextLineFor(speaker) {
+        for (let step = 0; step < lines.length; step++) {
+          const index = (script.cursor + step) % lines.length;
+          if (lines[index].speaker === speaker) return lines[index];
+        }
+        return null;
+      }
+      function renderNext() {
+        const speaker = script.nextSpeaker;
+        const line = nextLineFor(speaker);
+        const language =
+          LANGUAGE_NAMES[languageOf(speaker)] ?? languageOf(speaker);
+        $('next-who').textContent =
+          `${roleName(speaker)} speaks next · ${language}`;
+        $('next-line').textContent = line ? `“${line.says}”` : '';
+        $('next-note').textContent =
+          line?.gate?.status === 'FAIL'
+            ? 'Scripted to fail the quality gate: the translation is blocked and the clinician is asked to repeat.'
+            : `${speaker === 'clinician' ? 'Low' : 'High'} tone first. Any speech works: the stand-in plays the scripted translation.`;
+      }
+
+      function onFourPoints(event) {
+        switch (event.kind) {
+          case 'conversation':
+            log(
+              'fourpoints',
+              event.state === 'opened'
+                ? 'session.start → conversation.start (en-US ↔ es-US)'
+                : 'Session closed',
+            );
+            if (event.state === 'opened') resetScript();
+            break;
+          case 'listening':
+            $('listening').textContent = `Listening to the ${event.speaker}…`;
+            log(
+              'fourpoints',
+              `turn.start speaker=${event.speaker}, binary audio frames flowing`,
+            );
+            break;
+          case 'heard':
+            $('listening').textContent = '';
+            log(
+              'fourpoints',
+              `turn.end: ${(event.audioMs / 1000).toFixed(1)} s of 16 kHz PCM received`,
+            );
+            break;
+          case 'translated': {
+            const { line, index, status } = event;
+            script.cursor = index + 1;
+            const li = document.createElement('li');
+            li.className = `turn ${line.speaker}`;
+            li.innerHTML = `<div class="meta"><span class="role"></span><span class="lang"></span><span class="pill">Translating</span></div>
+              <div class="said"></div><div class="translation"></div><div class="reason" hidden></div>`;
+            li.querySelector('.role').textContent = roleName(line.speaker);
+            li.querySelector('.lang').textContent =
+              `${languageOf(line.speaker)} → ${languageOf(other(line.speaker))}`;
+            li.querySelector('.said').textContent = line.says;
+            li.querySelector('.translation').textContent = line.translation;
+            $('turns').prepend(li);
+            script.cards.set(index, li);
+            log(
+              'fourpoints',
+              `transcript.final → translation.final → quality.result ${status}`,
+            );
+            break;
+          }
+          case 'spoken': {
+            const li = script.cards.get(event.index);
+            const pill = li?.querySelector('.pill');
+            if (pill) {
+              pill.textContent = 'Verified · spoken';
+              pill.className = 'pill spoken';
+            }
+            const line = lines[event.index];
+            script.nextSpeaker = other(line.speaker);
+            renderNext();
+            log(
+              'fourpoints',
+              `tts.started → ${(event.audioMs / 1000).toFixed(1)} s of speech in 0x02 frames → tts.ended`,
+            );
+            break;
+          }
+          case 'blocked': {
+            const li = script.cards.get(event.index);
+            const line = lines[event.index];
+            if (li) {
+              const pill = li.querySelector('.pill');
+              pill.textContent = 'Blocked · not spoken';
+              pill.className = 'pill blocked';
+              const reason = li.querySelector('.reason');
+              reason.hidden = false;
+              reason.textContent = line.gate.reasons.join(' ');
+            }
+            script.nextSpeaker = line.speaker;
+            renderNext();
+            log(
+              'fourpoints',
+              'warning QUALITY_VALIDATION_FAILED: nothing spoken, same speaker repeats',
+            );
+            break;
+          }
+        }
+      }
+
+      const events = new EventSource('/events');
+      events.onmessage = ({ data }) => {
+        const event = JSON.parse(data);
+        if (event.source === 'fourpoints') {
+          onFourPoints(event);
+        } else if (event.source === 'gateway') {
+          const { event: name, time: _t, ...fields } = event.detail;
+          const summary = Object.entries(fields)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(' ');
+          log('gateway', `${name}${summary ? ` ${summary}` : ''}`);
+        } else if (event.kind === 'webhook') {
+          log('gateway', `${event.path} → ${event.status} TwiML`);
+        } else if (event.kind === 'stream') {
+          log(
+            'gateway',
+            `/media ${event.state}${event.reason ? `: ${event.reason}` : ''}`,
+          );
+        }
+      };
+
+      const counts = Object.values(demo.sources).reduce(
+        (acc, source) => ((acc[source] = (acc[source] ?? 0) + 1), acc),
+        {},
+      );
+      $('footer').textContent =
+        `${demo.script.title}. Speech per line: ${Object.entries(counts)
+          .map(([k, v]) => `${v} ${k}`)
+          .join(', ')}. ` +
+        'Put recordings in apps/telephony-demo/recordings/ to replace placeholders.';
+      renderNext();
+    </script>
+  </body>
+</html>

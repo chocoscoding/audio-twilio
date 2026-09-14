@@ -1,0 +1,18 @@
+{
+  "name": "@fourpoints/telephony-demo",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Scripted demo around the unchanged telephony gateway: browser phone, local Twilio emulator and a FourPoints stand-in",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@fourpoints/protocol": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13"
+  }
+}

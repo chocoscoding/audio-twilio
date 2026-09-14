@@ -1,0 +1,33 @@
+# Never copy credentials, local state, or development artifacts into an image.
+.aws
+.git
+.github
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/id_rsa*
+.ssh
+
+# Build outputs and dependencies are produced inside the build stage.
+node_modules
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+coverage
+
+# Tests, tooling and docs are not part of a production image.
+**/*.test.ts
+**/*.spec.ts
+infrastructure
+docs
+tests
+**/vitest.config.ts
+eslint.config.mjs
+.prettierrc.json
+.prettierignore
+
+# Local media/scratch that must never be baked in (no audio in images).
+**/*.wav
+**/*.mp3
+**/*.pcm
