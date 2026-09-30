@@ -44,6 +44,7 @@ interface FakeFourPoints {
   url: string;
   turns: { speaker: string; sampleRateHz: number; samples: number }[];
   authorization: (string | undefined)[];
+  userAgent: (string | undefined)[];
   close(): Promise<void>;
 }
 
@@ -54,10 +55,12 @@ async function startFakeFourPoints(): Promise<FakeFourPoints> {
     url: `ws://127.0.0.1:${(wss.address() as AddressInfo).port}`,
     turns: [],
     authorization: [],
+    userAgent: [],
     close: () => new Promise((resolve) => wss.close(() => resolve())),
   };
   wss.on('connection', (ws, req) => {
     fake.authorization.push(req.headers.authorization);
+    fake.userAgent.push(req.headers['user-agent']);
     let turn: FakeFourPoints['turns'][number] | undefined;
     const send = (message: ServerMessage) => ws.send(JSON.stringify(message));
     ws.on('message', (data, isBinary) => {
@@ -352,6 +355,8 @@ describe('telephony gateway (integration)', () => {
     await fetchLanguages({ url: fake.url, authHeaders });
     await fetchLanguages({ url: fake.url, authHeaders });
     expect(fake.authorization.at(-1)).toBe('Bearer abc');
+    // The FourPoints edge WAF rejects upgrades that carry no User-Agent.
+    expect(fake.userAgent.at(-1)).toBe('fourpoints-telephony');
     expect(fetchImpl).toHaveBeenCalledTimes(1); // token reused
   });
 });

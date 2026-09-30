@@ -57,7 +57,13 @@ function send(ws: WebSocket, message: ClientMessage): void {
 }
 
 async function connect(target: FourPointsTarget): Promise<WebSocket> {
-  const headers = await target.authHeaders();
+  // `ws` sends no User-Agent, and the FourPoints edge WAF (AWS managed
+  // NoUserAgent rule) answers a request without one with 403 before the
+  // token is even checked.
+  const headers = {
+    'user-agent': 'fourpoints-telephony',
+    ...(await target.authHeaders()),
+  };
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(target.url, {
       headers,
