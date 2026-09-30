@@ -70,6 +70,17 @@ describe('IVR webhooks', () => {
     );
   });
 
+  it('pauses before the welcome so the network does not clip it', () => {
+    const first = hook('/voice/incoming');
+    expect(first).toMatch(
+      /<Gather[^>]*><Pause length="2"\/><Say[^>]*>Welcome to FourPoints interpretation\. /,
+    );
+    // A retry is mid-call: no pause, and no second welcome.
+    const retry = hook('/voice/mode', { attempt: '1' }, { Digits: '9' });
+    expect(retry).not.toContain('<Pause');
+    expect(retry).toContain('Sorry, that was not a valid choice.');
+  });
+
   it('reads the language menu from the registry, with two-digit entry', () => {
     const twiml = hook('/voice/mode', { attempt: '1' }, { Digits: '1' });
     expect(twiml).toContain('numDigits="2" finishOnKey="#" timeout="3"');

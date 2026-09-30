@@ -66,6 +66,11 @@ export function handleVoiceWebhook(
           actionOnEmptyResult: true,
           action: url('/voice/mode', { attempt: tries }),
         },
+        // The phone network drops the first second or two of audio after a
+        // call is answered, which swallowed the welcome sentence. A short
+        // pause lets the audio path open first; keys pressed during it
+        // still count, because it is inside the Gather.
+        ...(tries === 1 ? [element('Pause', { length: 2 })] : []),
         say(
           `${tries > 1 ? 'Sorry, that was not a valid choice. ' : 'Welcome to FourPoints interpretation. '}` +
             'For an AI interpreter, press 1. For a human interpreter, press 2.',
@@ -178,7 +183,7 @@ export function handleVoiceWebhook(
   const announce = (text: string): string =>
     response(
       say(text),
-      element('Pause', { length: 1 }),
+      element('Pause', { length: 2 }),
       say('Thank you for calling FourPoints. Goodbye.'),
       element('Hangup'),
     );
