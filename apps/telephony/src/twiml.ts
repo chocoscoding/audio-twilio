@@ -37,8 +37,12 @@ export function element(
  * English translations, so the call sounds like one person throughout.
  * Google.en-US-Chirp3-HD-* voices sound a touch richer but add an audible
  * pause before every prompt while Twilio synthesizes them.
+ *
+ * PROMPT_VOICE overrides it without a code change (e.g.
+ * `Polly.Joanna-Neural`), for when a voice clips the start of prompts.
  */
-export const PROMPT_VOICE = 'Polly.Joanna-Generative';
+export const PROMPT_VOICE =
+  process.env['PROMPT_VOICE']?.trim() || 'Polly.Joanna-Generative';
 
 /** Spoken prompt in one consistent voice. */
 export function say(text: string): string {
