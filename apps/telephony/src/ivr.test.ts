@@ -70,15 +70,18 @@ describe('IVR webhooks', () => {
     );
   });
 
-  it('pauses before the welcome so the network does not clip it', () => {
-    const first = hook('/voice/incoming');
-    expect(first).toMatch(
-      /<Gather[^>]*><Pause length="2"\/><Say[^>]*>Welcome to FourPoints interpretation\. /,
+  it('starts each prompt document with a throwaway lead-in', () => {
+    // Networks clip the first word or two after silence; the lead-in is
+    // what gets clipped, so the real prompt is heard whole.
+    expect(hook('/voice/incoming')).toMatch(
+      /<Gather[^>]*><Say[^>]*>One moment please\. Welcome to FourPoints interpretation\. /,
     );
-    // A retry is mid-call: no pause, and no second welcome.
-    const retry = hook('/voice/mode', { attempt: '1' }, { Digits: '9' });
-    expect(retry).not.toContain('<Pause');
-    expect(retry).toContain('Sorry, that was not a valid choice.');
+    const menuTwiml = hook('/voice/mode', { attempt: '1' }, { Digits: '1' });
+    expect(menuTwiml).toMatch(
+      /<Say[^>]*>One moment please\. Please choose a language/,
+    );
+    // Once per document, not before every sentence.
+    expect(menuTwiml.match(/One moment please\./g)).toHaveLength(1);
   });
 
   it('reads the language menu from the registry, with two-digit entry', () => {

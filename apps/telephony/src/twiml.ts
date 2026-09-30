@@ -53,6 +53,27 @@ export function say(text: string): string {
   );
 }
 
+/**
+ * Spoken before the first prompt of every TwiML document. Phone networks
+ * that mute the line during silence reopen it a moment AFTER speech starts,
+ * which clipped the first word or two of every prompt ("...Points
+ * interpretation"). Silence before the prompt does not help; a throwaway
+ * phrase does, because the clipping eats it instead of the real words.
+ * PROMPT_LEAD_IN overrides it; set it empty to disable.
+ */
+export const PROMPT_LEAD_IN = (
+  process.env['PROMPT_LEAD_IN'] ?? 'One moment please.'
+).trim();
+
 export function response(...verbs: string[]): string {
-  return `<?xml version="1.0" encoding="UTF-8"?>${element('Response', {}, ...verbs)}`;
+  const body = element('Response', {}, ...verbs);
+  const withLeadIn =
+    PROMPT_LEAD_IN === ''
+      ? body
+      : body.replace(
+          /<Say([^>]*)>/,
+          (_match, attrs: string) =>
+            `<Say${attrs}>${escapeXml(PROMPT_LEAD_IN)} `,
+        );
+  return `<?xml version="1.0" encoding="UTF-8"?>${withLeadIn}`;
 }
