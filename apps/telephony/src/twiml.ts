@@ -32,11 +32,19 @@ export function element(
     : `<${name}${attrs}>${children.join('')}</${name}>`;
 }
 
-/** Spoken prompt in one consistent neural voice. */
+/**
+ * Polly generative Joanna: natural, and the same voice FourPoints uses for
+ * English translations, so the call sounds like one person throughout.
+ * Google.en-US-Chirp3-HD-* voices sound a touch richer but add an audible
+ * pause before every prompt while Twilio synthesizes them.
+ */
+export const PROMPT_VOICE = 'Polly.Joanna-Generative';
+
+/** Spoken prompt in one consistent voice. */
 export function say(text: string): string {
   return element(
     'Say',
-    { voice: 'Polly.Joanna-Neural', language: 'en-US' },
+    { voice: PROMPT_VOICE, language: 'en-US' },
     escapeXml(text),
   );
 }

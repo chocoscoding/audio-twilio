@@ -1,5 +1,8 @@
 import type { VadConfig } from './vad.js';
 
+/** Silence that ends a caller's turn unless VAD_HANGOVER_MS overrides it. */
+export const PHONE_HANGOVER_MS = 1150;
+
 export type FourPointsAuthConfig =
   | { mode: 'none' }
   | {
@@ -29,7 +32,23 @@ export interface TelephonyConfig {
   maxCalls: number;
   sessionRotateAfterMs: number;
   vad: Partial<VadConfig>;
+  /**
+   * Presentation mode: the IVR runs on the real number, but instead of
+   * streaming to FourPoints or dialing interpreters it announces where the
+   * call would be routed. No FourPoints or interpreter numbers are needed.
+   */
+  presentationMode: boolean;
+  /** Language names read in the presentation-mode menu, in order. */
+  presentationLanguages: string[];
 }
+
+const DEFAULT_PRESENTATION_LANGUAGES = [
+  'Spanish',
+  'Mandarin',
+  'Arabic',
+  'French',
+  'Portuguese',
+];
 
 const E164 = /^\+[1-9]\d{6,14}$/;
 const ACCOUNT_SID = /^AC[0-9a-f]{32}$/;
@@ -114,6 +133,15 @@ export function loadConfig(
     problems.push('FOURPOINTS_AUTH=none is refused in production');
   }
 
+  const presentationMode = read('PRESENTATION_MODE', 'false') === 'true';
+  const presentationLanguages = read('PRESENTATION_LANGUAGES', '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name !== '');
+  if (presentationLanguages.length > 9) {
+    problems.push('PRESENTATION_LANGUAGES must list at most 9 languages');
+  }
+
   const humanNumbers: Record<string, string[]> = {};
   try {
     const parsed: unknown = JSON.parse(read('HUMAN_INTERPRETER_NUMBERS', '{}'));
@@ -138,7 +166,21 @@ export function loadConfig(
       }
       humanNumbers[key] = numbers as string[];
     }
-    if (humanNumbers['default'] === undefined) {
+    // Simple form: HUMAN_INTERPRETER_NUMBER=+15551234567[,+15557654321]
+    const simple = read('HUMAN_INTERPRETER_NUMBER', '')
+      .split(',')
+      .map((n) => n.trim())
+      .filter((n) => n !== '');
+    if (simple.length > 0) {
+      if (simple.length > 10 || !simple.every((n) => E164.test(n))) {
+        problems.push(
+          'HUMAN_INTERPRETER_NUMBER must be 1-10 numbers in +15551234567 format, comma-separated',
+        );
+      } else {
+        humanNumbers['default'] = simple;
+      }
+    }
+    if (humanNumbers['default'] === undefined && !presentationMode) {
       problems.push('HUMAN_INTERPRETER_NUMBERS must include a "default" entry');
     }
   } catch {
@@ -159,6 +201,13 @@ export function loadConfig(
     }
     vad.minRms = value;
   }
+  // Callers pause mid-thought ("uh…"); the shared 900 ms default cut turns
+  // short on the phone, so the gateway waits longer before ending a turn.
+  const hangoverMs = integer('VAD_HANGOVER_MS', PHONE_HANGOVER_MS, 1);
+  if (hangoverMs < 300 || hangoverMs > 10_000) {
+    problems.push('VAD_HANGOVER_MS must be between 300 and 10000');
+  }
+  vad.hangoverMs = hangoverMs;
 
   const config: TelephonyConfig = {
     port,
@@ -182,6 +231,11 @@ export function loadConfig(
       60_000,
     ),
     vad,
+    presentationMode,
+    presentationLanguages:
+      presentationLanguages.length > 0
+        ? presentationLanguages
+        : DEFAULT_PRESENTATION_LANGUAGES,
   };
 
   if (problems.length > 0) {

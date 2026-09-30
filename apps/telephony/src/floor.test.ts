@@ -156,16 +156,45 @@ describe('Floor', () => {
     expect(t.floor.currentPhase).toBe('listening');
   });
 
-  it('switches the next speaker on star, only while listening', () => {
+  it('switches the next speaker on star while listening', () => {
     const t = setup();
     t.floor.start();
     t.played();
     t.floor.dtmf('*');
     expect(t.events.at(-1)).toBe('cue:patient');
     t.played();
-    t.push(SPEECH, 3); // capturing now
+    expect(t.floor.currentPhase).toBe('listening');
+    expect(t.floor.currentSpeaker).toBe('patient');
+  });
+
+  it('ends the turn on star mid-speech, then hands over after the translation', () => {
+    const t = setup();
+    t.floor.start();
+    t.played();
+    t.push(SPEECH, 3); // capturing, still talking — no silence yet
     t.floor.dtmf('*');
-    expect(t.events.at(-1)).toBe('turn:patient');
+    expect(t.events.at(-1)).toBe('turn.end');
+    expect(t.floor.currentPhase).toBe('processing');
+    const sent = t.frames();
+    t.push(SPEECH, 10); // audio after star is not part of the turn
+    expect(t.frames()).toBe(sent);
+    t.queueSpeech();
+    t.floor.turnFinished();
+    t.played();
+    expect(t.events.at(-1)).toBe('cue:patient');
+    t.played();
+    expect(t.floor.currentSpeaker).toBe('patient');
+    expect(t.floor.currentPhase).toBe('listening');
+  });
+
+  it('ignores star while a translation is processing', () => {
+    const t = setup();
+    t.floor.start();
+    t.played();
+    t.speakTurn();
+    t.floor.dtmf('*');
+    expect(t.events.filter((e) => e === 'turn.end')).toHaveLength(1);
+    expect(t.floor.currentPhase).toBe('processing');
   });
 
   it('never wedges: a turn with no result is failed by the watchdog', () => {

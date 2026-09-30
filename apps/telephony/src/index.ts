@@ -7,8 +7,9 @@
 import { createAuthHeaders } from './auth.js';
 import { loadConfig, type TelephonyConfig } from './config.js';
 import { fetchLanguages, type FourPointsTarget } from './fourpoints.js';
-import { LanguageRegistry } from './languages.js';
+import { LanguageRegistry, staticMenu } from './languages.js';
 import { log } from './log.js';
+import { openPresentationLogs } from './presentation-log.js';
 import { createTelephonyServer } from './server.js';
 
 const LANGUAGE_REFRESH_MS = 5 * 60_000;
@@ -34,15 +35,23 @@ const registry = new LanguageRegistry({
   order: config.menuLanguageOrder,
   refreshMs: LANGUAGE_REFRESH_MS,
 });
-registry.start();
+const presentationMenu = staticMenu(config.presentationLanguages);
+const presentationLogDir = process.env['PRESENTATION_LOG_DIR'];
+if (config.presentationMode && presentationLogDir) {
+  openPresentationLogs(presentationLogDir, config.publicBaseUrl);
+}
+if (!config.presentationMode) {
+  registry.start();
+}
 
 const server = await createTelephonyServer({
   config,
   target,
-  menu: () => registry.menu,
+  menu: () => (config.presentationMode ? presentationMenu : registry.menu),
 });
 log('telephony.listening', {
   port: server.port,
+  presentationMode: config.presentationMode,
   fourPoints: config.fourPointsUrl,
   auth: config.fourPointsAuth.mode,
   maxCalls: config.maxCalls,

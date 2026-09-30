@@ -24,6 +24,14 @@ import type { FourPointsTarget } from './fourpoints.js';
 import { handleVoiceWebhook } from './ivr.js';
 import type { LanguageMenu } from './languages.js';
 import { log } from './log.js';
+import {
+  describeTwiml,
+  describeWebhook,
+  problem,
+  streamLog,
+  twilioLog,
+} from './presentation-log.js';
+import { runPresentationStream } from './presentation-stream.js';
 import { isValidTwilioSignature } from './twilio-signature.js';
 
 const MAX_WEBHOOK_BODY_BYTES = 16 * 1024;
@@ -120,6 +128,12 @@ export async function createTelephonyServer(
       )
     ) {
       log('webhook.rejected', { path: url.pathname });
+      twilioLog(
+        'note',
+        problem(
+          `Rejected ${url.pathname}: signature does not match the Auth Token`,
+        ),
+      );
       reply(res, 403, 'text/plain', 'Forbidden');
       return;
     }
@@ -128,11 +142,16 @@ export async function createTelephonyServer(
       menu: options.menu(),
       aiAvailable: aiAvailable(),
     });
+    twilioLog(
+      'in',
+      `POST ${url.pathname}  ${describeWebhook(url.pathname, body)}`,
+    );
     if (twiml === null) {
       reply(res, 404, 'text/plain', 'Not found');
       return;
     }
     reply(res, 200, 'text/xml', twiml);
+    twilioLog('out', 'TwiML reply:', ...describeTwiml(twiml));
   };
 
   const server = createServer((req, res) => {
@@ -152,6 +171,10 @@ export async function createTelephonyServer(
     socket.on('error', () => undefined);
     const refuse = (status: number, reason: string) => {
       log('media.refused', { reason });
+      streamLog(
+        'note',
+        problem(`Refused a WebSocket on ${req.url}: ${reason}`),
+      );
       socket.end(
         `HTTP/1.1 ${status} ${STATUS_CODES[status] ?? ''}\r\nConnection: close\r\n\r\n`,
       );
@@ -181,6 +204,16 @@ export async function createTelephonyServer(
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
       activeCalls += 1;
+      if (config.presentationMode) {
+        runPresentationStream(ws, {
+          config,
+          menu: options.menu,
+          onEnd: () => {
+            activeCalls -= 1;
+          },
+        });
+        return;
+      }
       runCall(ws, {
         config,
         target: options.target,

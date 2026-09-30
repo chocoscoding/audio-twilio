@@ -92,6 +92,39 @@ describe('buildMenu', () => {
     ).not.toBe(a.version);
   });
 
+  it('reads plain language names without the region', () => {
+    const menu = buildMenu(FOURPOINTS_LANGUAGES, 'en-US');
+    expect(menu.entries.map((e) => e.displayName)).toEqual([
+      'Spanish',
+      'French',
+      'German',
+      'Italian',
+      'Portuguese',
+      'Hindi',
+      'Japanese',
+      'Korean',
+      'Mandarin Chinese',
+      'Arabic',
+    ]);
+  });
+
+  it('keeps the region when two languages would otherwise sound the same', () => {
+    const menu = buildMenu(
+      [
+        language('en-US', 'English (US)'),
+        language('es-US', 'Spanish (US)'),
+        language('es-ES', 'Spanish (Spain)'),
+        language('fr-FR', 'French (France)'),
+      ],
+      'en-US',
+    );
+    expect(menu.entries.map((e) => e.displayName)).toEqual([
+      'Spanish (US)',
+      'Spanish (Spain)',
+      'French',
+    ]);
+  });
+
   it('finds entries by digits and by language', () => {
     const menu = buildMenu(FOURPOINTS_LANGUAGES, 'en-US');
     expect(findByDigits(menu, '10')?.languageId).toBe('ar-AE');

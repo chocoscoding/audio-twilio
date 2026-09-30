@@ -75,8 +75,13 @@ export function handleVoiceWebhook(
 
   const languageMenu = (menuMode: Mode, tries: number) => {
     const twoDigits = menu.entries.length > 9;
+    // "For Spanish, press 1. French, press 2." — the first option sets the
+    // pattern, so the rest drop the leading "For".
     const options = menu.entries
-      .map((entry) => `For ${entry.displayName}, press ${entry.digits}.`)
+      .map(
+        (entry, i) =>
+          `${i === 0 ? 'For ' : ''}${entry.displayName}, press ${entry.digits}.`,
+      )
       .join(' ');
     return response(
       element(
@@ -133,12 +138,12 @@ export function handleVoiceWebhook(
     ];
   };
 
-  const connectAi = (entry: MenuEntry): string[] => [
-    say(
-      `Connecting the AI interpreter for ${entry.displayName}. ` +
-        'Speak one at a time after the tone: a low tone for the clinician, ' +
-        'a high tone for the patient. Press star to switch speakers.',
-    ),
+  const connectAi = (
+    entry: MenuEntry,
+    intro = `You are connected to the FourPoints ${entry.displayName} AI Interpreter. ` +
+      'Please speak one person at a time. Press star when you are done.',
+  ): string[] => [
+    say(intro),
     element(
       'Connect',
       { action: url('/voice/ai-ended', { lang: entry.languageId }) },
@@ -168,6 +173,68 @@ export function handleVoiceWebhook(
           say('The AI interpreter is not available right now.'),
           ...dialHuman(entry),
         );
+
+  // Presentation mode: same menus, but each route announces its destination.
+  const announce = (text: string): string =>
+    response(
+      say(text),
+      element('Pause', { length: 1 }),
+      say('Thank you for calling FourPoints. Goodbye.'),
+      element('Hangup'),
+    );
+  // Rings HUMAN_INTERPRETER_NUMBER when set; otherwise only announces.
+  // No press-1 screening here, so whoever answers is connected at once.
+  const announceHuman = () => {
+    const numbers = config.humanNumbers['default'];
+    if (numbers === undefined) {
+      return announce('You are being routed to a human interpreter.');
+    }
+    return response(
+      say('You are being routed to a human interpreter. Please hold.'),
+      element(
+        'Dial',
+        {
+          answerOnBridge: true,
+          timeout: 30,
+          action: url('/voice/human-result'),
+        },
+        ...numbers.map((number) => element('Number', {}, escapeXml(number))),
+      ),
+    );
+  };
+  // Opens a real Twilio Media Stream; the gateway plays the caller's words
+  // back so the audio path in both directions can be seen and heard.
+  const announceAi = (entry: MenuEntry) =>
+    response(
+      ...connectAi(
+        entry,
+        `You are connected to the AI interpreter. This is the ${entry.displayName} language stream. ` +
+          'After the beep, say something, and you will hear it played back.',
+      ),
+    );
+
+  if (config.presentationMode) {
+    if (path === '/voice/ai-ended') {
+      return body.get('CallStatus') === 'completed'
+        ? response()
+        : announce('The language stream has ended.');
+    }
+    if (path === '/voice/mode' && digits === '2') {
+      return announceHuman();
+    }
+    if (path === '/voice/mode' && attempt >= MAX_ATTEMPTS && digits !== '1') {
+      return announceHuman();
+    }
+    if (path === '/voice/select') {
+      const entry = findByDigits(menu, digits);
+      if (entry !== undefined && query.get('v') === menu.version) {
+        return mode === 'ai' ? announceAi(entry) : announceHuman();
+      }
+      if (attempt >= MAX_ATTEMPTS) {
+        return announceHuman();
+      }
+    }
+  }
 
   switch (path) {
     case '/voice/incoming':

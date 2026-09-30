@@ -4,7 +4,7 @@ import type { WireLanguageCapability } from '@fourpoints/protocol';
 
 import { loadConfig } from './config.js';
 import { handleVoiceWebhook, type IvrContext } from './ivr.js';
-import { EMPTY_MENU, buildMenu } from './languages.js';
+import { EMPTY_MENU, buildMenu, staticMenu } from './languages.js';
 
 const BASE = 'https://phone.example.com';
 const config = loadConfig({
@@ -76,8 +76,9 @@ describe('IVR webhooks', () => {
     expect(twiml).toContain(
       `action="${BASE}/voice/select?mode=ai&amp;v=${menu.version}&amp;attempt=1"`,
     );
-    expect(twiml).toContain('For Spanish (US), press 1.');
-    expect(twiml).toContain('For Arabic (Gulf), press 10.');
+    expect(twiml).toContain('For Spanish, press 1.');
+    expect(twiml).toContain('For Spanish, press 1. French, press 2.');
+    expect(twiml).toContain('Arabic, press 10.');
     expect(twiml).toContain('Then press pound.');
   });
 
@@ -107,6 +108,9 @@ describe('IVR webhooks', () => {
       '/voice/select',
       { mode: 'ai', v: menu.version },
       { Digits: '2' },
+    );
+    expect(twiml).toContain(
+      'You are connected to the FourPoints French AI Interpreter. Please speak one person at a time.',
     );
     expect(twiml).toContain(
       `<Connect action="${BASE}/voice/ai-ended?lang=fr-FR">`,
@@ -184,7 +188,7 @@ describe('IVR webhooks', () => {
   it('screens interpreters so voicemail cannot answer', () => {
     const whisper = hook('/voice/whisper', { lang: 'es-US' });
     expect(whisper).toContain(
-      'FourPoints interpretation call for Spanish (US). Press 1 to accept.',
+      'FourPoints interpretation call for Spanish. Press 1 to accept.',
     );
     expect(whisper).toContain('<Hangup/>');
     expect(hook('/voice/whisper-accept', {}, { Digits: '1' })).toBe(
@@ -215,5 +219,93 @@ describe('IVR webhooks', () => {
         },
       ),
     ).toBeNull();
+  });
+});
+
+describe('IVR webhooks in presentation mode', () => {
+  const presentation = loadConfig({
+    PUBLIC_BASE_URL: BASE,
+    TWILIO_ACCOUNT_SID: `AC${'0'.repeat(32)}`,
+    TWILIO_AUTH_TOKEN: 'token',
+    PRESENTATION_MODE: 'true',
+    PRESENTATION_LANGUAGES: 'Spanish, Mandarin',
+  });
+  const staticLanguages = staticMenu(presentation.presentationLanguages);
+  const present = (
+    path: string,
+    query: Record<string, string> = {},
+    body: Record<string, string> = {},
+  ) =>
+    hook(path, query, body, {
+      config: presentation,
+      menu: staticLanguages,
+    });
+
+  it('announces the human route without dialing anyone', () => {
+    const twiml = present('/voice/mode', { attempt: '1' }, { Digits: '2' });
+    expect(twiml).toContain('You are being routed to a human interpreter.');
+    expect(twiml).toContain('<Hangup/>');
+    expect(twiml).not.toContain('<Dial');
+  });
+
+  it('rings HUMAN_INTERPRETER_NUMBER when it is set', () => {
+    const withNumber = loadConfig({
+      PUBLIC_BASE_URL: BASE,
+      TWILIO_ACCOUNT_SID: `AC${'0'.repeat(32)}`,
+      TWILIO_AUTH_TOKEN: 'token',
+      PRESENTATION_MODE: 'true',
+      HUMAN_INTERPRETER_NUMBER: '+15550001111',
+    });
+    const twiml = hook(
+      '/voice/mode',
+      { attempt: '1' },
+      { Digits: '2' },
+      { config: withNumber, menu: staticLanguages },
+    );
+    expect(twiml).toContain('You are being routed to a human interpreter.');
+    expect(twiml).toContain(
+      `<Dial answerOnBridge="true" timeout="30" action="${BASE}/voice/human-result"><Number>+15550001111</Number></Dial>`,
+    );
+    expect(twiml).not.toContain('<Hangup/>');
+  });
+
+  it('reads the configured languages after pressing 1', () => {
+    const twiml = present('/voice/mode', { attempt: '1' }, { Digits: '1' });
+    expect(twiml).toContain('For Spanish, press 1. Mandarin, press 2.');
+  });
+
+  it('announces the chosen language and opens its media stream', () => {
+    const twiml = present(
+      '/voice/select',
+      { mode: 'ai', v: staticLanguages.version, attempt: '1' },
+      { Digits: '2' },
+    );
+    expect(twiml).toContain(
+      'You are connected to the AI interpreter. This is the Mandarin language stream.',
+    );
+    expect(twiml).toContain(
+      `<Stream url="wss://phone.example.com/media" statusCallback="${BASE}/voice/stream-status">`,
+    );
+    expect(twiml).toContain('name="patientLanguageId" value="mandarin"');
+    expect(twiml).not.toContain('<Dial');
+  });
+
+  it('re-prompts on an invalid language, then routes to a human', () => {
+    const query = { mode: 'ai', v: staticLanguages.version };
+    expect(
+      present('/voice/select', { ...query, attempt: '1' }, { Digits: '7' }),
+    ).toContain('Sorry, that was not a valid choice.');
+    expect(
+      present('/voice/select', { ...query, attempt: '3' }, { Digits: '7' }),
+    ).toContain('You are being routed to a human interpreter.');
+  });
+
+  it('says goodbye when the stream ends without the caller hanging up', () => {
+    expect(
+      present('/voice/ai-ended', {}, { CallStatus: 'in-progress' }),
+    ).toContain('The language stream has ended.');
+    expect(
+      present('/voice/ai-ended', {}, { CallStatus: 'completed' }),
+    ).not.toContain('<Dial');
   });
 });

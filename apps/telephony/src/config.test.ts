@@ -10,6 +10,19 @@ const MINIMAL = {
 };
 
 describe('loadConfig', () => {
+  it('accepts one or more human interpreter numbers in simple form', () => {
+    const { HUMAN_INTERPRETER_NUMBERS: _, ...rest } = MINIMAL;
+    expect(
+      loadConfig({
+        ...rest,
+        HUMAN_INTERPRETER_NUMBER: '+15550001111, +15550002222',
+      }).humanNumbers,
+    ).toEqual({ default: ['+15550001111', '+15550002222'] });
+    expect(() =>
+      loadConfig({ ...rest, HUMAN_INTERPRETER_NUMBER: '555-0001' }),
+    ).toThrowError(/HUMAN_INTERPRETER_NUMBER must be/);
+  });
+
   it('applies local-development defaults that work with FourPoints out of the box', () => {
     const config = loadConfig(MINIMAL);
     expect(config).toMatchObject({
@@ -22,7 +35,17 @@ describe('loadConfig', () => {
       inputSampleRateHz: 16000,
       maxCalls: 20,
       humanNumbers: { default: ['+15550000001'] },
+      vad: { hangoverMs: 1150 },
     });
+  });
+
+  it('lets the end-of-turn pause be tuned within bounds', () => {
+    expect(
+      loadConfig({ ...MINIMAL, VAD_HANGOVER_MS: '3500' }).vad.hangoverMs,
+    ).toBe(3500);
+    expect(() =>
+      loadConfig({ ...MINIMAL, VAD_HANGOVER_MS: '100' }),
+    ).toThrowError(/VAD_HANGOVER_MS must be between 300 and 10000/);
   });
 
   it('reports every problem at once', () => {

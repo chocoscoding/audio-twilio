@@ -7,8 +7,7 @@ human, choose a language, and talk.
 This workspace mirrors the FourPoints monorepo so `apps/telephony` moves in
 unchanged when write access is granted.
 
-**Presenting the demo? Start with [PRESENTING.md](PRESENTING.md)** — setup,
-a pre-flight check, the run script and troubleshooting.
+**Deploying? Start with [DEPLOY.md](DEPLOY.md).**
 
 | Path                                | What it is                                                       |
 | ----------------------------------- | ---------------------------------------------------------------- |

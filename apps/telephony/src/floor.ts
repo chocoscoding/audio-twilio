@@ -110,28 +110,44 @@ export class Floor {
     if (this.phase === 'capturing') {
       this.effects.sendAudio(samples);
       if (this.vad.push(samples)?.type === 'speech-end') {
-        this.effects.endTurn();
-        this.vad.suspend();
-        this.phase = 'processing';
-        this.turnEnded = false;
-        this.spoke = false;
-        this.failed = false;
-        this.cancelWatchdog = this.effects.schedule(() => {
-          this.cancelWatchdog = null;
-          this.failed = true;
-          this.turnEnded = true;
-          this.settle();
-        }, PROCESSING_TIMEOUT_MS);
+        this.closeTurn();
       }
     }
     // handoff / processing / idle: discarded (echo gate).
   }
 
+  /**
+   * Star: "I'm done, it's the other person's turn."
+   *   listening → skip straight to the other speaker.
+   *   capturing → end the turn now instead of waiting for the silence
+   *               hangover; once its translation plays, the floor passes to
+   *               the other speaker as usual.
+   */
   dtmf(digit: string): void {
-    if (digit === '*' && this.phase === 'listening') {
+    if (digit !== '*') {
+      return;
+    }
+    if (this.phase === 'listening') {
       this.vad.suspend();
       this.handoff(this.other());
+    } else if (this.phase === 'capturing') {
+      this.closeTurn();
     }
+  }
+
+  private closeTurn(): void {
+    this.effects.endTurn();
+    this.vad.suspend();
+    this.phase = 'processing';
+    this.turnEnded = false;
+    this.spoke = false;
+    this.failed = false;
+    this.cancelWatchdog = this.effects.schedule(() => {
+      this.cancelWatchdog = null;
+      this.failed = true;
+      this.turnEnded = true;
+      this.settle();
+    }, PROCESSING_TIMEOUT_MS);
   }
 
   /** Translated speech for the current turn started playing out. */

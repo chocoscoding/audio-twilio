@@ -16,8 +16,6 @@ WORKDIR /build
 COPY package.json package-lock.json ./
 COPY packages/protocol/package.json packages/protocol/
 COPY apps/telephony/package.json apps/telephony/
-# Every workspace manifest must be present for `npm ci` to accept the lockfile.
-COPY apps/telephony-demo/package.json apps/telephony-demo/
 
 RUN npm ci --workspaces --include-workspace-root
 

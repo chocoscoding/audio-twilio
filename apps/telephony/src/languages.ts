@@ -50,11 +50,42 @@ export function buildMenu(
         a.index - b.index,
     )
     .slice(0, MAX_MENU_LANGUAGES)
-    .map(({ language }, i) => ({
+    .map(({ language }) => language);
+  const spoken = entries.map((l) => spokenName(l.displayName));
+  return menuOf(
+    entries.map((language, i) => {
+      const name = spokenName(language.displayName);
+      return {
+        digits: String(i + 1),
+        languageId: language.languageId,
+        // Callers hear "Spanish", not "Spanish (US)" — unless another entry
+        // would then sound identical, when the region tells them apart.
+        displayName:
+          spoken.filter((s) => s === name).length > 1
+            ? language.displayName
+            : name,
+      };
+    }),
+  );
+}
+
+/** "Spanish (US)" → "Spanish"; names without a region are unchanged. */
+export function spokenName(displayName: string): string {
+  return displayName.replace(/\s*\([^)]*\)\s*$/, '') || displayName;
+}
+
+/** A fixed menu of language names, for presentation mode. */
+export function staticMenu(names: readonly string[]): LanguageMenu {
+  return menuOf(
+    names.slice(0, MAX_MENU_LANGUAGES).map((displayName, i) => ({
       digits: String(i + 1),
-      languageId: language.languageId,
-      displayName: language.displayName,
-    }));
+      languageId: displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      displayName,
+    })),
+  );
+}
+
+function menuOf(entries: MenuEntry[]): LanguageMenu {
   if (entries.length === 0) {
     return EMPTY_MENU;
   }
