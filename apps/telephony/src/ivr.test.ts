@@ -70,18 +70,10 @@ describe('IVR webhooks', () => {
     );
   });
 
-  it('starts each prompt document with a throwaway lead-in', () => {
-    // Networks clip the first word or two after silence; the lead-in is
-    // what gets clipped, so the real prompt is heard whole.
+  it('starts the welcome immediately, with no lead-in by default', () => {
     expect(hook('/voice/incoming')).toMatch(
-      /<Gather[^>]*><Say[^>]*>One moment please\. Welcome to FourPoints interpretation\. /,
+      /<Gather[^>]*><Say[^>]*>Welcome to FourPoints interpretation\. /,
     );
-    const menuTwiml = hook('/voice/mode', { attempt: '1' }, { Digits: '1' });
-    expect(menuTwiml).toMatch(
-      /<Say[^>]*>One moment please\. Please choose a language/,
-    );
-    // Once per document, not before every sentence.
-    expect(menuTwiml.match(/One moment please\./g)).toHaveLength(1);
   });
 
   it('reads the language menu from the registry, with two-digit entry', () => {

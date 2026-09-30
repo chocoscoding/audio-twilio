@@ -54,16 +54,14 @@ export function say(text: string): string {
 }
 
 /**
- * Spoken before the first prompt of every TwiML document. Phone networks
- * that mute the line during silence reopen it a moment AFTER speech starts,
- * which clipped the first word or two of every prompt ("...Points
- * interpretation"). Silence before the prompt does not help; a throwaway
- * phrase does, because the clipping eats it instead of the real words.
- * PROMPT_LEAD_IN overrides it; set it empty to disable.
+ * Optional phrase spoken before the first prompt of every TwiML document.
+ * Some phone lines mute during silence and clip the first word or two of a
+ * prompt; a throwaway lead-in (e.g. "One moment please.") gets clipped
+ * instead. Off by default since the prompt voice moved to
+ * Polly.Joanna-Neural. Set PROMPT_LEAD_IN to turn it back on if the start
+ * of prompts is clipped again.
  */
-export const PROMPT_LEAD_IN = (
-  process.env['PROMPT_LEAD_IN'] ?? 'One moment please.'
-).trim();
+export const PROMPT_LEAD_IN = (process.env['PROMPT_LEAD_IN'] ?? '').trim();
 
 export function response(...verbs: string[]): string {
   const body = element('Response', {}, ...verbs);
