@@ -46,38 +46,38 @@ const menu = buildMenu(
   'en-US',
 );
 
-function hook(
+async function hook(
   path: string,
   query: Record<string, string> = {},
   body: Record<string, string> = {},
   overrides: Partial<IvrContext> = {},
-): string {
+): Promise<string> {
   const ctx: IvrContext = { config, menu, aiAvailable: true, ...overrides };
   return (
-    handleVoiceWebhook(
+    (await handleVoiceWebhook(
       path,
       new URLSearchParams(query),
       new URLSearchParams(body),
       ctx,
-    ) ?? 'NOT FOUND'
+    )) ?? 'NOT FOUND'
   );
 }
 
 describe('IVR webhooks', () => {
-  it('greets with the AI / human choice', () => {
-    expect(hook('/voice/incoming')).toContain(
+  it('greets with the AI / human choice', async () => {
+    expect(await hook('/voice/incoming')).toContain(
       `<Gather input="dtmf" numDigits="1" timeout="6" actionOnEmptyResult="true" action="${BASE}/voice/mode?attempt=1">`,
     );
   });
 
-  it('starts the welcome immediately, with no lead-in by default', () => {
-    expect(hook('/voice/incoming')).toMatch(
+  it('starts the welcome immediately, with no lead-in by default', async () => {
+    expect(await hook('/voice/incoming')).toMatch(
       /<Gather[^>]*><Say[^>]*>Welcome to FourPoints interpretation\. /,
     );
   });
 
-  it('reads the language menu from the registry, with two-digit entry', () => {
-    const twiml = hook('/voice/mode', { attempt: '1' }, { Digits: '1' });
+  it('reads the language menu from the registry, with two-digit entry', async () => {
+    const twiml = await hook('/voice/mode', { attempt: '1' }, { Digits: '1' });
     expect(twiml).toContain('numDigits="2" finishOnKey="#" timeout="3"');
     expect(twiml).toContain(
       `action="${BASE}/voice/select?mode=ai&amp;v=${menu.version}&amp;attempt=1"`,
@@ -88,18 +88,18 @@ describe('IVR webhooks', () => {
     expect(twiml).toContain('Then press pound.');
   });
 
-  it('re-prompts on an invalid choice, then routes to a human', () => {
-    const retry = hook('/voice/mode', { attempt: '1' }, { Digits: '7' });
+  it('re-prompts on an invalid choice, then routes to a human', async () => {
+    const retry = await hook('/voice/mode', { attempt: '1' }, { Digits: '7' });
     expect(retry).toContain('Sorry, that was not a valid choice.');
     expect(retry).toContain('attempt=2');
-    const last = hook('/voice/mode', { attempt: '3' }, {});
+    const last = await hook('/voice/mode', { attempt: '3' }, {});
     expect(last).toContain('<Dial');
     expect(last).toContain('+15550000001');
     expect(last).not.toContain('<Gather');
   });
 
-  it('sends callers to a human when no AI language is available', () => {
-    const twiml = hook(
+  it('sends callers to a human when no AI language is available', async () => {
+    const twiml = await hook(
       '/voice/mode',
       {},
       { Digits: '1' },
@@ -109,8 +109,8 @@ describe('IVR webhooks', () => {
     expect(twiml).toContain('<Dial');
   });
 
-  it('connects the AI stream with metadata in <Parameter>, never a query string', () => {
-    const twiml = hook(
+  it('connects the AI stream with metadata in <Parameter>, never a query string', async () => {
+    const twiml = await hook(
       '/voice/select',
       { mode: 'ai', v: menu.version },
       { Digits: '2' },
@@ -132,8 +132,8 @@ describe('IVR webhooks', () => {
     );
   });
 
-  it('re-reads the menu when the digits were collected against another version', () => {
-    const twiml = hook(
+  it('re-reads the menu when the digits were collected against another version', async () => {
+    const twiml = await hook(
       '/voice/select',
       { mode: 'ai', v: 'stale' },
       { Digits: '2' },
@@ -142,8 +142,8 @@ describe('IVR webhooks', () => {
     expect(twiml).not.toContain('<Connect');
   });
 
-  it('falls back to a human for that language when AI is at capacity', () => {
-    const twiml = hook(
+  it('falls back to a human for that language when AI is at capacity', async () => {
+    const twiml = await hook(
       '/voice/select',
       { mode: 'ai', v: menu.version },
       { Digits: '1' },
@@ -155,8 +155,8 @@ describe('IVR webhooks', () => {
     );
   });
 
-  it('dials language-specific interpreters with a screening whisper', () => {
-    const twiml = hook(
+  it('dials language-specific interpreters with a screening whisper', async () => {
+    const twiml = await hook(
       '/voice/select',
       { mode: 'human', v: menu.version },
       { Digits: '1' },
@@ -166,55 +166,65 @@ describe('IVR webhooks', () => {
     expect(twiml).not.toContain('+15550000001');
   });
 
-  it('offers a human when the AI stream ends while the caller is still on the line', () => {
+  it('offers a human when the AI stream ends while the caller is still on the line', async () => {
     expect(
-      hook('/voice/ai-ended', { lang: 'es-US' }, { CallStatus: 'completed' }),
+      await hook(
+        '/voice/ai-ended',
+        { lang: 'es-US' },
+        { CallStatus: 'completed' },
+      ),
     ).toBe('<?xml version="1.0" encoding="UTF-8"?><Response/>');
     expect(
-      hook('/voice/ai-ended', { lang: 'es-US' }, { CallStatus: 'in-progress' }),
+      await hook(
+        '/voice/ai-ended',
+        { lang: 'es-US' },
+        { CallStatus: 'in-progress' },
+      ),
     ).toContain('<Dial');
   });
 
-  it('offers AI after an unanswered human dial', () => {
-    const twiml = hook(
+  it('offers AI after an unanswered human dial', async () => {
+    const twiml = await hook(
       '/voice/human-result',
       { lang: 'es-US' },
       { DialCallStatus: 'no-answer' },
     );
     expect(twiml).toContain(`action="${BASE}/voice/ai?lang=es-US"`);
     expect(
-      hook('/voice/human-result', {}, { DialCallStatus: 'completed' }),
+      await hook('/voice/human-result', {}, { DialCallStatus: 'completed' }),
     ).toContain('<Hangup/>');
-    expect(hook('/voice/ai', { lang: 'es-US' }, { Digits: '1' })).toContain(
-      '<Connect',
+    expect(
+      await hook('/voice/ai', { lang: 'es-US' }, { Digits: '1' }),
+    ).toContain('<Connect');
+    expect(await hook('/voice/ai', { lang: 'es-US' }, {})).toContain(
+      'Goodbye.',
     );
-    expect(hook('/voice/ai', { lang: 'es-US' }, {})).toContain('Goodbye.');
   });
 
-  it('screens interpreters so voicemail cannot answer', () => {
-    const whisper = hook('/voice/whisper', { lang: 'es-US' });
+  it('screens interpreters so voicemail cannot answer', async () => {
+    const whisper = await hook('/voice/whisper', { lang: 'es-US' });
     expect(whisper).toContain(
       'FourPoints interpretation call for Spanish. Press 1 to accept.',
     );
     expect(whisper).toContain('<Hangup/>');
-    expect(hook('/voice/whisper-accept', {}, { Digits: '1' })).toBe(
+    expect(await hook('/voice/whisper-accept', {}, { Digits: '1' })).toBe(
       '<?xml version="1.0" encoding="UTF-8"?><Response/>',
     );
-    expect(hook('/voice/whisper-accept', {}, { Digits: '2' })).toContain(
+    expect(await hook('/voice/whisper-accept', {}, { Digits: '2' })).toContain(
       '<Hangup/>',
     );
   });
 
-  it('escapes registry text and rejects unknown routes', () => {
+  it('escapes registry text and rejects unknown routes', async () => {
     const odd = buildMenu(
       [voice('en-US', 'English'), voice('xx', 'R&D <Test>')],
       'en-US',
     );
-    expect(hook('/voice/mode', {}, { Digits: '2' }, { menu: odd })).toContain(
-      'For R&amp;D &lt;Test&gt;, press 1.',
-    );
     expect(
-      handleVoiceWebhook(
+      await hook('/voice/mode', {}, { Digits: '2' }, { menu: odd }),
+    ).toContain('For R&amp;D &lt;Test&gt;, press 1.');
+    expect(
+      await handleVoiceWebhook(
         '/voice/nope',
         new URLSearchParams(),
         new URLSearchParams(),
@@ -247,14 +257,18 @@ describe('IVR webhooks in presentation mode', () => {
       menu: staticLanguages,
     });
 
-  it('announces the human route without dialing anyone', () => {
-    const twiml = present('/voice/mode', { attempt: '1' }, { Digits: '2' });
+  it('announces the human route without dialing anyone', async () => {
+    const twiml = await present(
+      '/voice/mode',
+      { attempt: '1' },
+      { Digits: '2' },
+    );
     expect(twiml).toContain('You are being routed to a human interpreter.');
     expect(twiml).toContain('<Hangup/>');
     expect(twiml).not.toContain('<Dial');
   });
 
-  it('rings HUMAN_INTERPRETER_NUMBER when it is set', () => {
+  it('rings HUMAN_INTERPRETER_NUMBER when it is set', async () => {
     const withNumber = loadConfig({
       PUBLIC_BASE_URL: BASE,
       TWILIO_ACCOUNT_SID: `AC${'0'.repeat(32)}`,
@@ -262,7 +276,7 @@ describe('IVR webhooks in presentation mode', () => {
       PRESENTATION_MODE: 'true',
       HUMAN_INTERPRETER_NUMBER: '+15550001111',
     });
-    const twiml = hook(
+    const twiml = await hook(
       '/voice/mode',
       { attempt: '1' },
       { Digits: '2' },
@@ -275,13 +289,17 @@ describe('IVR webhooks in presentation mode', () => {
     expect(twiml).not.toContain('<Hangup/>');
   });
 
-  it('reads the configured languages after pressing 1', () => {
-    const twiml = present('/voice/mode', { attempt: '1' }, { Digits: '1' });
+  it('reads the configured languages after pressing 1', async () => {
+    const twiml = await present(
+      '/voice/mode',
+      { attempt: '1' },
+      { Digits: '1' },
+    );
     expect(twiml).toContain('For Spanish, press 1. Mandarin, press 2.');
   });
 
-  it('announces the chosen language and opens its media stream', () => {
-    const twiml = present(
+  it('announces the chosen language and opens its media stream', async () => {
+    const twiml = await present(
       '/voice/select',
       { mode: 'ai', v: staticLanguages.version, attempt: '1' },
       { Digits: '2' },
@@ -296,22 +314,30 @@ describe('IVR webhooks in presentation mode', () => {
     expect(twiml).not.toContain('<Dial');
   });
 
-  it('re-prompts on an invalid language, then routes to a human', () => {
+  it('re-prompts on an invalid language, then routes to a human', async () => {
     const query = { mode: 'ai', v: staticLanguages.version };
     expect(
-      present('/voice/select', { ...query, attempt: '1' }, { Digits: '7' }),
+      await present(
+        '/voice/select',
+        { ...query, attempt: '1' },
+        { Digits: '7' },
+      ),
     ).toContain('Sorry, that was not a valid choice.');
     expect(
-      present('/voice/select', { ...query, attempt: '3' }, { Digits: '7' }),
+      await present(
+        '/voice/select',
+        { ...query, attempt: '3' },
+        { Digits: '7' },
+      ),
     ).toContain('You are being routed to a human interpreter.');
   });
 
-  it('says goodbye when the stream ends without the caller hanging up', () => {
+  it('says goodbye when the stream ends without the caller hanging up', async () => {
     expect(
-      present('/voice/ai-ended', {}, { CallStatus: 'in-progress' }),
+      await present('/voice/ai-ended', {}, { CallStatus: 'in-progress' }),
     ).toContain('The language stream has ended.');
     expect(
-      present('/voice/ai-ended', {}, { CallStatus: 'completed' }),
+      await present('/voice/ai-ended', {}, { CallStatus: 'completed' }),
     ).not.toContain('<Dial');
   });
 });

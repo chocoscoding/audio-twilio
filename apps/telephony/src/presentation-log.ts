@@ -120,6 +120,13 @@ export function describeWebhook(path: string, body: URLSearchParams): string {
   switch (path) {
     case '/voice/incoming':
       return `${highlight('New call')} from ${maskPhone(body.get('From'))} to ${body.get('To') ?? '?'}`;
+    case '/voice/org/incoming':
+      return `${highlight('New call')} on the organization line from ${maskPhone(body.get('From'))}`;
+    case '/voice/org/number':
+      return `Organization ID: ${pressed}`;
+    case '/voice/org/code':
+      // Never shown: it is a credential.
+      return 'Access code entered (not shown)';
     case '/voice/mode':
       return `Main menu answer: ${pressed}`;
     case '/voice/select':

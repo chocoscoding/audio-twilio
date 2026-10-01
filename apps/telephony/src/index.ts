@@ -4,6 +4,7 @@
  *   node --env-file=apps/telephony/.env apps/telephony/dist/index.js
  */
 
+import { createAccessClient } from './access.js';
 import { createAuthHeaders } from './auth.js';
 import { loadConfig, type TelephonyConfig } from './config.js';
 import { fetchLanguages, type FourPointsTarget } from './fourpoints.js';
@@ -29,6 +30,20 @@ const target: FourPointsTarget = {
   authHeaders: createAuthHeaders(config.fourPointsAuth),
 };
 
+// The organization line's code check and usage, through the control-plane
+// API. Same machine client, its own scope (and so its own token).
+const access =
+  config.fourPointsApiUrl === undefined
+    ? undefined
+    : createAccessClient(
+        config.fourPointsApiUrl,
+        createAuthHeaders(
+          config.fourPointsAuth.mode === 'none'
+            ? config.fourPointsAuth
+            : { ...config.fourPointsAuth, scope: config.fourPointsPhoneScope },
+        ),
+      );
+
 const registry = new LanguageRegistry({
   fetchLanguages: () => fetchLanguages(target),
   clinicianLanguageId: config.clinicianLanguageId,
@@ -48,12 +63,14 @@ const server = await createTelephonyServer({
   config,
   target,
   menu: () => (config.presentationMode ? presentationMenu : registry.menu),
+  ...(access === undefined ? {} : { access }),
 });
 log('telephony.listening', {
   port: server.port,
   presentationMode: config.presentationMode,
   fourPoints: config.fourPointsUrl,
   auth: config.fourPointsAuth.mode,
+  organizationLine: access !== undefined,
   maxCalls: config.maxCalls,
 });
 

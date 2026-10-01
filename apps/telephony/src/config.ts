@@ -22,6 +22,14 @@ export interface TelephonyConfig {
   validateSignatures: boolean;
   fourPointsUrl: string;
   fourPointsAuth: FourPointsAuthConfig;
+  /**
+   * FourPoints control-plane API origin for the organization line
+   * (/voice/org/*). Unset: that line answers "not available"; the current
+   * number is unaffected.
+   */
+  fourPointsApiUrl: string | undefined;
+  /** OAuth scope for the API's phone routes (same machine client). */
+  fourPointsPhoneScope: string;
   clinicianLanguageId: string;
   menuLanguageOrder: string[];
   /** languageId → E.164 numbers; always contains "default". */
@@ -133,6 +141,29 @@ export function loadConfig(
     problems.push('FOURPOINTS_AUTH=none is refused in production');
   }
 
+  const fourPointsApiUrl =
+    read('FOURPOINTS_API_URL', '').replace(/\/+$/, '') || undefined;
+  if (fourPointsApiUrl !== undefined) {
+    let url: URL | undefined;
+    try {
+      url = new URL(fourPointsApiUrl);
+    } catch {
+      problems.push('FOURPOINTS_API_URL must be a URL');
+    }
+    if (url !== undefined && (url.pathname !== '/' || url.search !== '')) {
+      problems.push(
+        'FOURPOINTS_API_URL must be an origin with no path or query',
+      );
+    }
+    if (url !== undefined && production && url.protocol !== 'https:') {
+      problems.push('FOURPOINTS_API_URL must use https in production');
+    }
+  }
+  const fourPointsPhoneScope = read(
+    'FOURPOINTS_PHONE_SCOPE',
+    'fourpoints-internal/phone.resolve',
+  );
+
   const presentationMode = read('PRESENTATION_MODE', 'false') === 'true';
   const presentationLanguages = read('PRESENTATION_LANGUAGES', '')
     .split(',')
@@ -217,6 +248,8 @@ export function loadConfig(
     validateSignatures,
     fourPointsUrl,
     fourPointsAuth,
+    fourPointsApiUrl,
+    fourPointsPhoneScope,
     clinicianLanguageId: read('CLINICIAN_LANGUAGE_ID', 'en-US'),
     menuLanguageOrder: read('MENU_LANGUAGE_ORDER', '')
       .split(',')

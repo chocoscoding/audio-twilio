@@ -1,7 +1,8 @@
 /**
  * HTTP + WebSocket front door:
  *   GET  /healthz   liveness; 503 while draining
- *   POST /voice/*   Twilio webhooks → TwiML (signature-checked)
+ *   POST /voice/*   Twilio webhooks → TwiML (signature-checked); the
+ *                   organization line (/voice/org/*) also calls FourPoints
  *   WS   /media     Twilio bidirectional Media Streams (signature-checked)
  *
  * The only per-instance state is a count of active calls, used to refuse new
@@ -18,6 +19,7 @@ import {
 
 import { WebSocketServer } from 'ws';
 
+import type { AccessClient } from './access.js';
 import { runCall } from './call.js';
 import type { TelephonyConfig } from './config.js';
 import type { FourPointsTarget } from './fourpoints.js';
@@ -41,6 +43,8 @@ export interface TelephonyServerOptions {
   config: TelephonyConfig;
   target: FourPointsTarget;
   menu: () => LanguageMenu;
+  /** FourPoints phone API; without it the organization line says "not available". */
+  access?: AccessClient;
 }
 
 export interface TelephonyServer {
@@ -137,11 +141,18 @@ export async function createTelephonyServer(
       reply(res, 403, 'text/plain', 'Forbidden');
       return;
     }
-    const twiml = handleVoiceWebhook(url.pathname, url.searchParams, body, {
-      config,
-      menu: options.menu(),
-      aiAvailable: aiAvailable(),
-    });
+    const twiml = await handleVoiceWebhook(
+      url.pathname,
+      url.searchParams,
+      body,
+      {
+        config,
+        menu: options.menu(),
+        aiAvailable: aiAvailable(),
+        ...(options.access === undefined ? {} : { access: options.access }),
+        log,
+      },
+    );
     twilioLog(
       'in',
       `POST ${url.pathname}  ${describeWebhook(url.pathname, body)}`,

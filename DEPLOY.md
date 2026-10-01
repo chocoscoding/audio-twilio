@@ -124,6 +124,8 @@ Store secrets in your secret manager, not in the image.
 | `VAD_HANGOVER_MS`                         | —        | `1150` — silence that ends a caller's turn                          |
 | `INPUT_SAMPLE_RATE_HZ`                    | —        | leave at `16000`; FourPoints rejects anything else                  |
 | `PRESENTATION_MODE`                       | —        | `false`                                                             |
+| `FOURPOINTS_API_URL`                      | —        | organization line only: FourPoints API origin, `https://…`          |
+| `FOURPOINTS_PHONE_SCOPE`                  | —        | `fourpoints-internal/phone.resolve` (default)                       |
 
 `TWILIO_VALIDATE_SIGNATURES=false` is refused in production. The gateway
 checks all of this at start-up and exits with a list of every problem.
@@ -134,6 +136,10 @@ Twilio Console → Phone Numbers → your number → Voice Configuration:
 
 - **A call comes in:** Webhook, `https://phone.<domain>/voice/incoming`, POST
 - **Call status changes** (optional): `https://phone.<domain>/voice/status`
+
+The **organization line** (a second number: caller enters the organization
+ID, then an access code) uses `https://phone.<domain>/voice/org/incoming`
+instead, and needs `FOURPOINTS_API_URL`. Do not change the current number.
 
 The account must be upgraded (trial accounts block `<Stream>` and `<Dial>`),
 and call recording stays off.
