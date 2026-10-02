@@ -231,14 +231,22 @@ describe('organization line', () => {
     );
     expect(menuTwiml).toContain('finishOnKey=""');
     expect(menuTwiml).toContain('timeout="10"');
-    const empty = await hook('/voice/mode', { ...GRANT, attempt: '1' }, {
-      Digits: '',
-    });
+    const empty = await hook(
+      '/voice/mode',
+      { ...GRANT, attempt: '1' },
+      {
+        Digits: '',
+      },
+    );
     expect(empty).toContain('You have not made a choice.');
     expect(empty).not.toContain('not a valid choice');
-    const wrong = await hook('/voice/mode', { ...GRANT, attempt: '1' }, {
-      Digits: '7',
-    });
+    const wrong = await hook(
+      '/voice/mode',
+      { ...GRANT, attempt: '1' },
+      {
+        Digits: '7',
+      },
+    );
     expect(wrong).toContain('Sorry, that was not a valid choice.');
   });
 

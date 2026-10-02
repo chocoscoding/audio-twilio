@@ -130,7 +130,9 @@ export async function handleVoiceWebhook(
         ? 'You have not made a choice. '
         : 'Sorry, that was not a valid choice. ';
   const noChoice = () =>
-    goodbye('We did not receive a choice. Please call again when you are ready.');
+    goodbye(
+      'We did not receive a choice. Please call again when you are ready.',
+    );
 
   const modeMenu = (tries: number) =>
     response(
