@@ -117,6 +117,21 @@ export async function handleVoiceWebhook(
     return `${config.publicBaseUrl}${route}${qs === '' ? '' : `?${qs}`}`;
   };
 
+  // The organization line never picks for the caller: no input is said as
+  // such and asked again, and after the last try the call ends (owner
+  // request 2026-10-02). The pound key is ignored in its one-key menus, so a
+  // pound pressed after the access code cannot count as a choice. The
+  // current number keeps its original behaviour.
+  const orgLine = () => grant !== undefined;
+  const retryLead = (tries: number) =>
+    tries <= 1
+      ? ''
+      : orgLine() && (digits ?? '') === ''
+        ? 'You have not made a choice. '
+        : 'Sorry, that was not a valid choice. ';
+  const noChoice = () =>
+    goodbye('We did not receive a choice. Please call again when you are ready.');
+
   const modeMenu = (tries: number) =>
     response(
       element(
@@ -124,12 +139,13 @@ export async function handleVoiceWebhook(
         {
           input: 'dtmf',
           numDigits: 1,
-          timeout: 6,
+          timeout: orgLine() ? 10 : 6,
+          ...(orgLine() ? { finishOnKey: '' } : {}),
           actionOnEmptyResult: true,
           action: url('/voice/mode', { attempt: tries }),
         },
         say(
-          `${tries > 1 ? 'Sorry, that was not a valid choice. ' : grant !== undefined ? 'Thank you. ' : 'Welcome to FourPoints interpretation. '}` +
+          `${tries > 1 ? retryLead(tries) : grant !== undefined ? 'Thank you. ' : 'Welcome to FourPoints interpretation. '}` +
             'For an AI interpreter, press 1. For a human interpreter, press 2.',
         ),
       ),
@@ -152,7 +168,7 @@ export async function handleVoiceWebhook(
           input: 'dtmf',
           numDigits: twoDigits ? 2 : 1,
           finishOnKey: '#',
-          timeout: twoDigits ? 3 : 6,
+          timeout: twoDigits ? 3 : orgLine() ? 10 : 6,
           actionOnEmptyResult: true,
           action: url('/voice/select', {
             mode: menuMode,
@@ -161,7 +177,7 @@ export async function handleVoiceWebhook(
           }),
         },
         say(
-          `${tries > 1 ? 'Sorry, that was not a valid choice. ' : ''}` +
+          `${retryLead(tries)}` +
             `Please choose a language. ${options}` +
             `${twoDigits ? ' Then press pound.' : ''}`,
         ),
@@ -329,10 +345,11 @@ export async function handleVoiceWebhook(
       element(
         'Gather',
         {
+          // No digit count: the caller's pound ends the entry, so it is
+          // never left over for the next menu. Silence also ends it.
           input: 'dtmf',
-          numDigits: 5,
           finishOnKey: '#',
-          timeout: 8,
+          timeout: 6,
           actionOnEmptyResult: true,
           action: url('/voice/org/number', { attempt: tries }),
         },
@@ -345,12 +362,12 @@ export async function handleVoiceWebhook(
         'Gather',
         {
           input: 'dtmf',
-          numDigits: 6,
-          timeout: 10,
+          finishOnKey: '#',
+          timeout: 6,
           actionOnEmptyResult: true,
           action: url('/voice/org/code', { n: orgNumber, attempt: tries }),
         },
-        say('Please enter your six digit access code.'),
+        say('Please enter your six digit access code, then press pound.'),
       ),
     );
   const notRecognized = () =>
@@ -524,7 +541,10 @@ export async function handleVoiceWebhook(
         }
         return languageMenu(digits === '1' ? 'ai' : 'human', 1);
       }
-      return attempt >= MAX_ATTEMPTS ? human(undefined) : modeMenu(attempt + 1);
+      if (attempt >= MAX_ATTEMPTS) {
+        return orgLine() ? noChoice() : human(undefined);
+      }
+      return modeMenu(attempt + 1);
 
     case '/voice/select': {
       if (menu.entries.length === 0) {
@@ -536,9 +556,10 @@ export async function handleVoiceWebhook(
       }
       const entry = findByDigits(menu, digits);
       if (entry === undefined) {
-        return attempt >= MAX_ATTEMPTS
-          ? human(undefined)
-          : languageMenu(mode, attempt + 1);
+        if (attempt >= MAX_ATTEMPTS) {
+          return orgLine() ? noChoice() : human(undefined);
+        }
+        return languageMenu(mode, attempt + 1);
       }
       return mode === 'ai' ? aiOrHuman(entry) : human(entry);
     }

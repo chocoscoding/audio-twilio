@@ -119,7 +119,15 @@ describe('organization line', () => {
       { attempt: '1' },
       { Digits: '010' },
     );
-    expect(second).toContain('Please enter your six digit access code.');
+    expect(second).toContain(
+      'Please enter your six digit access code, then press pound.',
+    );
+    // Both entries end on pound (no digit count), so the caller's pound is
+    // used up there and never reaches the next menu.
+    expect(first).toContain('finishOnKey="#"');
+    expect(first).not.toContain('numDigits');
+    expect(second).toContain('finishOnKey="#"');
+    expect(second).not.toContain('numDigits');
     expect(second).toContain(
       `action="${BASE}/voice/org/code?n=10&amp;attempt=1"`,
     );
@@ -212,6 +220,39 @@ describe('organization line', () => {
       { access: f.access },
     );
     expect(firstAction(twiml)).toEqual({ attempt: '2' });
+  });
+
+  it('the mode menu ignores pound and waits; no key press is said as such', async () => {
+    const menuTwiml = await hook(
+      '/voice/org/code',
+      { n: '10', attempt: '1' },
+      { Digits: '123456' },
+      { access: fakeAccess(OK).access },
+    );
+    expect(menuTwiml).toContain('finishOnKey=""');
+    expect(menuTwiml).toContain('timeout="10"');
+    const empty = await hook('/voice/mode', { ...GRANT, attempt: '1' }, {
+      Digits: '',
+    });
+    expect(empty).toContain('You have not made a choice.');
+    expect(empty).not.toContain('not a valid choice');
+    const wrong = await hook('/voice/mode', { ...GRANT, attempt: '1' }, {
+      Digits: '7',
+    });
+    expect(wrong).toContain('Sorry, that was not a valid choice.');
+  });
+
+  it('never picks a human for the caller: after the last try it says goodbye', async () => {
+    for (const path of ['/voice/mode', '/voice/select']) {
+      const twiml = await hook(
+        path,
+        { ...GRANT, mode: 'ai', v: menu.version, attempt: '3' },
+        {},
+      );
+      expect(twiml).toContain('We did not receive a choice.');
+      expect(twiml).toContain('<Hangup/>');
+      expect(twiml).not.toContain('<Dial');
+    }
   });
 
   it('with AI only, goes straight to the language menu', async () => {
