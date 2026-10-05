@@ -132,6 +132,31 @@ describe('Floor', () => {
     expect(t.floor.currentSpeaker).toBe('patient');
   });
 
+  it('LANGID-001: follows a confirmed speaker, so a patient who keeps talking stays the patient', () => {
+    const t = setup();
+    t.floor.start();
+    t.played();
+    // Expected: clinician. FourPoints hears Spanish and confirms the patient.
+    t.speakTurn();
+    expect(t.events).toContain('turn:clinician');
+    t.floor.speakerConfirmed('patient');
+    t.queueSpeech();
+    t.floor.turnFinished();
+    t.played();
+    // The reply played; the floor goes to the other party of who SPOKE.
+    expect(t.events.at(-1)).toBe('cue:clinician');
+    t.played();
+    expect(t.floor.currentSpeaker).toBe('clinician');
+  });
+
+  it('LANGID-001: ignores a confirmation outside a turn', () => {
+    const t = setup();
+    t.floor.start();
+    t.played();
+    t.floor.speakerConfirmed('patient'); // listening, no turn open
+    expect(t.floor.currentSpeaker).toBe('clinician');
+  });
+
   it('asks the same speaker to repeat when the turn was not spoken', () => {
     const t = setup();
     t.floor.start();

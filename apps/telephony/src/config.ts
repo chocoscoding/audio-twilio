@@ -46,6 +46,12 @@ export interface TelephonyConfig {
    * call would be routed. No FourPoints or interpreter numbers are needed.
    */
   presentationMode: boolean;
+  /**
+   * Ask FourPoints to check each turn's language and follow who actually
+   * spoke (LANGID-001). On by default; DETECT_SPEAKER_LANGUAGE=false turns
+   * it off without a code change.
+   */
+  detectSpeakerLanguage: boolean;
   /** Language names read in the presentation-mode menu, in order. */
   presentationLanguages: string[];
 }
@@ -165,6 +171,8 @@ export function loadConfig(
   );
 
   const presentationMode = read('PRESENTATION_MODE', 'false') === 'true';
+  const detectSpeakerLanguage =
+    read('DETECT_SPEAKER_LANGUAGE', 'true') !== 'false';
   const presentationLanguages = read('PRESENTATION_LANGUAGES', '')
     .split(',')
     .map((name) => name.trim())
@@ -265,6 +273,7 @@ export function loadConfig(
     ),
     vad,
     presentationMode,
+    detectSpeakerLanguage,
     presentationLanguages:
       presentationLanguages.length > 0
         ? presentationLanguages

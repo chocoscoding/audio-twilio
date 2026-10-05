@@ -26,6 +26,7 @@ export {
   type TtsEndedMessage,
   type TtsStartedMessage,
   type TurnEndMessage,
+  type TurnSpeakerMessage,
   type TurnStartMessage,
   type WarningMessage,
   type WireAudioFormat,
@@ -55,6 +56,8 @@ export {
 } from './audio-frame.js';
 
 export {
+  isWireAudioFormat,
+  SUPPORTED_SAMPLE_RATES_HZ,
   isClientMessage,
   isServerMessage,
   parseClientMessage,

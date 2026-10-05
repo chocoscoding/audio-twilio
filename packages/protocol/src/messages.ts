@@ -126,6 +126,14 @@ export interface TurnStartMessage {
   speechStartMs: number;
   /** Format of the binary audio frames streamed during this turn. */
   audioFormat: WireAudioFormat;
+  /**
+   * Language-aware auto mode: `speaker` is the EXPECTED participant, and the
+   * server identifies which of the conversation's two languages is actually
+   * spoken. When it is confidently the other participant's language, the
+   * server re-routes the turn and sends `turn.speaker`. Ignored for language
+   * pairs the provider cannot tell apart.
+   */
+  detectLanguage?: boolean;
 }
 
 export interface TurnEndMessage {
@@ -202,6 +210,17 @@ export interface ListeningMessage {
   turnId: string;
 }
 
+/**
+ * Sent only for a `detectLanguage` turn whose language identified the OTHER
+ * participant: the turn was re-routed and `speaker` is who actually spoke.
+ * Arrives before that turn's translation.
+ */
+export interface TurnSpeakerMessage {
+  type: 'turn.speaker';
+  turnId: string;
+  speaker: 'clinician' | 'patient';
+}
+
 export interface TranscriptPartialMessage {
   type: 'transcript.partial';
   turnId: string;
@@ -276,6 +295,7 @@ export type ServerMessage =
   | ConversationReadyMessage
   | ConversationLanguagesMessage
   | ListeningMessage
+  | TurnSpeakerMessage
   | TranscriptPartialMessage
   | TranscriptFinalMessage
   | TranslationStartedMessage

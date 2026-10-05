@@ -157,6 +157,18 @@ export class Floor {
     }
   }
 
+  /**
+   * FourPoints heard the OTHER participant's language and re-routed this
+   * turn (LANGID-001). The floor follows who actually spoke, so after the
+   * reply it goes to the other party of THAT speaker: someone who keeps
+   * talking keeps their own language.
+   */
+  speakerConfirmed(speaker: Speaker): void {
+    if (this.phase === 'capturing' || this.phase === 'processing') {
+      this.speaker = speaker;
+    }
+  }
+
   /** FourPoints declined to speak the turn (quality gate) or reported an error. */
   turnFailed(): void {
     if (this.phase === 'processing') {

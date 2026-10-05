@@ -42,7 +42,12 @@ const voice = (languageId: string): WireLanguageCapability => ({
 
 interface FakeFourPoints {
   url: string;
-  turns: { speaker: string; sampleRateHz: number; samples: number }[];
+  turns: {
+    speaker: string;
+    sampleRateHz: number;
+    samples: number;
+    detectLanguage?: boolean | undefined;
+  }[];
   authorization: (string | undefined)[];
   userAgent: (string | undefined)[];
   close(): Promise<void>;
@@ -100,6 +105,7 @@ async function startFakeFourPoints(): Promise<FakeFourPoints> {
             speaker: message.speaker,
             sampleRateHz: message.audioFormat.sampleRateHz,
             samples: 0,
+            detectLanguage: message.detectLanguage,
           };
           fake.turns.push(turn);
           send({ type: 'listening', turnId: 't1' });
@@ -331,6 +337,8 @@ describe('telephony gateway (integration)', () => {
     expect(fake.turns[0]).toMatchObject({
       speaker: 'clinician',
       sampleRateHz: 16000,
+      // LANGID-001: on by default, so FourPoints checks the language heard.
+      detectLanguage: true,
     });
     expect(fake.turns[0]?.samples ?? 0).toBeGreaterThan(8000);
     expect(receivedBytes).toBe(

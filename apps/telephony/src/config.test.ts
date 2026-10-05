@@ -23,6 +23,14 @@ describe('loadConfig', () => {
     ).toThrowError(/HUMAN_INTERPRETER_NUMBER must be/);
   });
 
+  it('detects the speaker language by default, and can be switched off', () => {
+    expect(loadConfig(MINIMAL).detectSpeakerLanguage).toBe(true);
+    expect(
+      loadConfig({ ...MINIMAL, DETECT_SPEAKER_LANGUAGE: 'false' })
+        .detectSpeakerLanguage,
+    ).toBe(false);
+  });
+
   it('applies local-development defaults that work with FourPoints out of the box', () => {
     const config = loadConfig(MINIMAL);
     expect(config).toMatchObject({

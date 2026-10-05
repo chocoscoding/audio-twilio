@@ -89,7 +89,7 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
   const floor = new Floor(new EnergyVad(TELEPHONY_RATE_HZ, config.vad), {
     startTurn: (speaker) => {
       upsampler.reset();
-      session?.startTurn(speaker);
+      session?.startTurn(speaker, config.detectSpeakerLanguage);
     },
     sendAudio: (samples) =>
       session?.sendAudio(
@@ -133,6 +133,11 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
           speechOpen = false;
           mark();
         }
+        break;
+      case 'turn.speaker':
+        // Which participant actually spoke (no content is logged).
+        log('call.speaker_switched', { call: callId });
+        floor.speakerConfirmed(message.speaker);
         break;
       case 'metrics.turn':
         floor.turnFinished();

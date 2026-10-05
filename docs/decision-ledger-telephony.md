@@ -117,3 +117,23 @@ Tradeoff: No queueing or interpreter presence; TaskRouter or the Voice SDK can
   replace it later without touching the AI path.
 Status: PROPOSED
 ```
+
+```text
+Decision ID: TELEPHONY-008
+Decision: The floor's speaker is an EXPECTATION. Each turn.start asks
+  FourPoints to identify which conversation language is spoken
+  (detectLanguage, FourPoints LANGID-001); on `turn.speaker` the floor takes
+  the confirmed speaker, so the next tone goes to the other party of who
+  actually spoke. Supersedes the strict alternation in TELEPHONY-002.
+  DETECT_SPEAKER_LANGUAGE=false restores strict alternation.
+Reason: Owner, 2026-10-05: a party who keeps speaking their language must
+  keep it; with strict alternation a patient's second consecutive turn was
+  recognised as English and translated the wrong way.
+Evidence: floor tests (follows a confirmed speaker; ignores one outside a
+  turn); integration test asserts detectLanguage on turn.start; FourPoints
+  staging measurement in LANGID-001.
+Tradeoff: ~0.5 s more per turn before translation; sub-second answers are
+  replayed in the expected language (FourPoints side) and so behave as
+  before. Star still switches the expected speaker by hand.
+Status: ACCEPTED (owner)
+```

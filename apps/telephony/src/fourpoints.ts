@@ -197,7 +197,12 @@ export class FourPointsSession {
     return this.turns;
   }
 
-  startTurn(speaker: Speaker): void {
+  /**
+   * `speaker` is the floor's expectation. With `detectLanguage`, FourPoints
+   * checks which of the two languages is heard and, if it is the other
+   * participant's, re-routes the turn and sends `turn.speaker` (LANGID-001).
+   */
+  startTurn(speaker: Speaker, detectLanguage = false): void {
     this.turns += 1;
     this.sequence = 0;
     send(this.ws, {
@@ -209,6 +214,7 @@ export class FourPointsSession {
         sampleRateHz: this.sampleRateHz,
         channels: 1,
       },
+      ...(detectLanguage ? { detectLanguage: true } : {}),
     });
   }
 

@@ -123,6 +123,7 @@ Store secrets in your secret manager, not in the image.
 | `MAX_CALLS`                               | —        | `20` per instance                                                   |
 | `VAD_HANGOVER_MS`                         | —        | `1150` — silence that ends a caller's turn                          |
 | `INPUT_SAMPLE_RATE_HZ`                    | —        | leave at `16000`; FourPoints rejects anything else                  |
+| `DETECT_SPEAKER_LANGUAGE`                 | —        | default `true`: FourPoints checks who actually spoke (LANGID-001)   |
 | `PRESENTATION_MODE`                       | —        | `false`                                                             |
 | `FOURPOINTS_API_URL`                      | —        | organization line only: FourPoints API origin, `https://…`          |
 | `FOURPOINTS_PHONE_SCOPE`                  | —        | `fourpoints-internal/phone.resolve` (default)                       |

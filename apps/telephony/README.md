@@ -29,6 +29,13 @@ Twilio number ──HTTPS webhooks──► gateway: IVR  (press 1 AI / 2 human 
    beep** = "not translated, please repeat". **Star** switches who speaks next.
    The gateway detects speech (`vad.ts`, the FourPoints browser VAD), streams
    the turn to FourPoints, and plays the translation back.
+   **Who actually spoke** (FourPoints LANGID-001): the tone is only the
+   expected speaker. FourPoints checks which of the two languages it hears;
+   if the patient speaks twice in a row, the second turn is still translated
+   from the patient's language, and the next tone goes to the clinician.
+   Very short answers ("Sí", "Okay") are too short to check and keep the
+   expected speaker, as before. `DETECT_SPEAKER_LANGUAGE=false` turns the
+   check off.
 4. **Human path, and every failure** — `<Dial>` rings the configured
    interpreters at once; each hears "FourPoints interpretation call for
    Spanish. Press 1 to accept" so voicemail cannot answer. If the AI stream
