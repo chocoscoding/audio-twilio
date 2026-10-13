@@ -6,6 +6,17 @@ import { log } from './log.js';
 
 /** The phone menu offers at most 14 languages (digits 1–14). */
 export const MAX_MENU_LANGUAGES = 14;
+/** Up to this many, every language is one key: 1–9, then 0 for the tenth. */
+export const ONE_KEY_LANGUAGES = 10;
+
+/**
+ * Key(s) for menu position i. One key each for up to ten languages (a
+ * two-digit menu makes every caller wait for a possible second digit);
+ * beyond ten, 1–14 with pound, as before.
+ */
+export function menuDigits(i: number, count: number): string {
+  return count <= ONE_KEY_LANGUAGES ? String((i + 1) % 10) : String(i + 1);
+}
 
 export interface MenuEntry {
   digits: string;
@@ -56,7 +67,7 @@ export function buildMenu(
     entries.map((language, i) => {
       const name = spokenName(language.displayName);
       return {
-        digits: String(i + 1),
+        digits: menuDigits(i, entries.length),
         languageId: language.languageId,
         // Callers hear "Spanish", not "Spanish (US)" — unless another entry
         // would then sound identical, when the region tells them apart.
@@ -77,8 +88,8 @@ export function spokenName(displayName: string): string {
 /** A fixed menu of language names, for presentation mode. */
 export function staticMenu(names: readonly string[]): LanguageMenu {
   return menuOf(
-    names.slice(0, MAX_MENU_LANGUAGES).map((displayName, i) => ({
-      digits: String(i + 1),
+    names.slice(0, MAX_MENU_LANGUAGES).map((displayName, i, all) => ({
+      digits: menuDigits(i, all.length),
       languageId: displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       displayName,
     })),

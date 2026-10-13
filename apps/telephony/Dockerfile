@@ -45,6 +45,8 @@ COPY --from=build --chown=node:node /build/package.json ./package.json
 COPY --from=build --chown=node:node /build/apps/telephony/dist ./apps/telephony/dist
 COPY --from=build --chown=node:node /build/apps/telephony/package.json ./apps/telephony/package.json
 COPY --from=build --chown=node:node /build/packages ./packages
+# Recorded IVR prompts; config.ts finds them at ../../../ivr-audio/final.
+COPY --chown=node:node ivr-audio/final ./ivr-audio/final
 
 USER node
 

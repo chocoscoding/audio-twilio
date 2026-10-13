@@ -76,15 +76,42 @@ describe('IVR webhooks', () => {
     );
   });
 
-  it('reads the language menu from the registry, with two-digit entry', async () => {
+  it('reads the language menu from the registry, one key per language', async () => {
     const twiml = await hook('/voice/mode', { attempt: '1' }, { Digits: '1' });
-    expect(twiml).toContain('numDigits="2" finishOnKey="#" timeout="3"');
+    // Ten languages: no second digit to wait for — the tenth is 0.
+    expect(twiml).toContain('numDigits="1" finishOnKey="#" timeout="6"');
     expect(twiml).toContain(
       `action="${BASE}/voice/select?mode=ai&amp;v=${menu.version}&amp;attempt=1"`,
     );
-    expect(twiml).toContain('For Spanish, press 1.');
-    expect(twiml).toContain('For Spanish, press 1. French, press 2.');
-    expect(twiml).toContain('Arabic, press 10.');
+    expect(twiml).toContain('For Spanish, press 1. For French, press 2.');
+    expect(twiml).toContain('For Arabic, press 0.');
+    expect(twiml).not.toContain('press pound');
+    const arabic = await hook(
+      '/voice/select',
+      { mode: 'ai', v: menu.version },
+      { Digits: '0' },
+    );
+    expect(arabic).toContain(
+      '<Parameter name="patientLanguageId" value="ar-AE"/>',
+    );
+  });
+
+  it('uses two-digit entry with pound beyond ten languages', async () => {
+    const eleven = buildMenu(
+      [
+        voice('en-US', 'English (US)'),
+        ...Array.from({ length: 11 }, (_, i) => voice(`x${i}-XX`, `Lang ${i}`)),
+      ],
+      'en-US',
+    );
+    const twiml = await hook(
+      '/voice/mode',
+      { attempt: '1' },
+      { Digits: '1' },
+      { menu: eleven },
+    );
+    expect(twiml).toContain('numDigits="2" finishOnKey="#" timeout="3"');
+    expect(twiml).toContain('For Lang 10, press 11.');
     expect(twiml).toContain('Then press pound.');
   });
 
@@ -116,7 +143,7 @@ describe('IVR webhooks', () => {
       { Digits: '2' },
     );
     expect(twiml).toContain(
-      'You are connected to the FourPoints French AI Interpreter. Please speak one person at a time.',
+      'You are connected to the French AI Interpreter. Please speak one person at a time.',
     );
     expect(twiml).toContain(
       `<Connect action="${BASE}/voice/ai-ended?lang=fr-FR">`,
@@ -295,7 +322,7 @@ describe('IVR webhooks in presentation mode', () => {
       { attempt: '1' },
       { Digits: '1' },
     );
-    expect(twiml).toContain('For Spanish, press 1. Mandarin, press 2.');
+    expect(twiml).toContain('For Spanish, press 1. For Mandarin, press 2.');
   });
 
   it('announces the chosen language and opens its media stream', async () => {

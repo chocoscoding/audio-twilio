@@ -23,6 +23,7 @@ import {
   type LanguageMenu,
   type MenuEntry,
 } from './languages.js';
+import type { PromptLibrary } from './prompts.js';
 import { element, escapeXml, response, say } from './twiml.js';
 
 export interface IvrContext {
@@ -32,6 +33,8 @@ export interface IvrContext {
   aiAvailable: boolean;
   /** The FourPoints phone API; the organization line needs it. */
   access?: AccessClient;
+  /** Recorded prompts; any line without a matching clip is a <Say>. */
+  prompts?: PromptLibrary;
   /** Content-free operational log. */
   log?: (
     event: string,
@@ -40,6 +43,30 @@ export interface IvrContext {
 }
 
 type Mode = 'ai' | 'human';
+/** One spoken line: recorded clip id (ivr-audio/script.mjs) and its text. */
+type Line = readonly [id: string, text: string];
+
+const WELCOME: Line = ['welcome', 'Welcome to FourPoints interpretation.'];
+const THANK_YOU: Line = ['thank-you', 'Thank you.'];
+const GOODBYE: Line = ['goodbye', 'Goodbye.'];
+const AI_NOT_AVAILABLE: Line = [
+  'ai-not-available',
+  'The AI interpreter is not available right now.',
+];
+const CODE_NOT_RECOGNIZED: Line = [
+  'code-not-recognized',
+  'Sorry, that organization ID or access code was not recognized.',
+];
+
+/** Clip-id suffix for a language: es-US → es-us. */
+const clipKey = (languageId: string) => languageId.toLowerCase();
+
+/** English part of the AI greeting; the clip goes on in the caller's language. */
+export const aiGreeting = (entry: MenuEntry): Line => [
+  `ai-connected-${clipKey(entry.languageId)}`,
+  `You are connected to the ${entry.displayName} AI Interpreter. ` +
+    'Please speak one person at a time. Press star when you are done.',
+];
 
 const MAX_ATTEMPTS = 3;
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -117,20 +144,55 @@ export async function handleVoiceWebhook(
     return `${config.publicBaseUrl}${route}${qs === '' ? '' : `?${qs}`}`;
   };
 
+  /**
+   * Lines → TwiML: a <Play> per line with a matching recorded clip; the rest
+   * as <Say>, adjacent ones merged so they read as one sentence as before.
+   */
+  const speak = (...lines: Line[]): string[] => {
+    const out: string[] = [];
+    let pending: string[] = [];
+    const flush = () => {
+      if (pending.length > 0) {
+        out.push(say(pending.join(' ')));
+        pending = [];
+      }
+    };
+    for (const [id, text] of lines) {
+      const clip = ctx.prompts?.match(id, text);
+      if (clip === undefined) {
+        pending.push(text);
+        continue;
+      }
+      flush();
+      out.push(
+        element(
+          'Play',
+          {},
+          escapeXml(
+            `${config.publicBaseUrl}/prompts/${clip.id}.wav?v=${clip.version}`,
+          ),
+        ),
+      );
+    }
+    flush();
+    return out;
+  };
+
   // The organization line never picks for the caller: no input is said as
   // such and asked again, and after the last try the call ends (owner
   // request 2026-10-02). The pound key is ignored in its one-key menus, so a
   // pound pressed after the access code cannot count as a choice. The
   // current number keeps its original behaviour.
   const orgLine = () => grant !== undefined;
-  const retryLead = (tries: number) =>
+  const retryLead = (tries: number): Line[] =>
     tries <= 1
-      ? ''
+      ? []
       : orgLine() && (digits ?? '') === ''
-        ? 'You have not made a choice. '
-        : 'Sorry, that was not a valid choice. ';
+        ? [['retry-no-input', 'You have not made a choice yet.']]
+        : [['retry-invalid', 'Sorry, that was not a valid choice.']];
   const noChoice = () =>
     goodbye(
+      'no-choice',
       'We did not receive a choice. Please call again when you are ready.',
     );
 
@@ -146,23 +208,25 @@ export async function handleVoiceWebhook(
           actionOnEmptyResult: true,
           action: url('/voice/mode', { attempt: tries }),
         },
-        say(
-          `${tries > 1 ? retryLead(tries) : grant !== undefined ? 'Thank you. ' : 'Welcome to FourPoints interpretation. '}` +
+        ...speak(
+          ...(tries > 1
+            ? retryLead(tries)
+            : [grant !== undefined ? THANK_YOU : WELCOME]),
+          [
+            'mode-menu',
             'For an AI interpreter, press 1. For a human interpreter, press 2.',
+          ],
         ),
       ),
     );
 
   const languageMenu = (menuMode: Mode, tries: number) => {
-    const twoDigits = menu.entries.length > 9;
-    // "For Spanish, press 1. French, press 2." — the first option sets the
-    // pattern, so the rest drop the leading "For".
-    const options = menu.entries
-      .map(
-        (entry, i) =>
-          `${i === 0 ? 'For ' : ''}${entry.displayName}, press ${entry.digits}.`,
-      )
-      .join(' ');
+    // Up to 10 languages are one key each (the tenth is 0).
+    const twoDigits = menu.entries.some((entry) => entry.digits.length > 1);
+    const options = menu.entries.map((entry): Line => [
+      `language-option-${clipKey(entry.languageId)}`,
+      `For ${entry.displayName}, press ${entry.digits}.`,
+    ]);
     return response(
       element(
         'Gather',
@@ -178,10 +242,13 @@ export async function handleVoiceWebhook(
             attempt: tries,
           }),
         },
-        say(
-          `${retryLead(tries)}` +
-            `Please choose a language. ${options}` +
-            `${twoDigits ? ' Then press pound.' : ''}`,
+        ...speak(
+          ...retryLead(tries),
+          ['language-menu-intro', 'Please choose a language.'],
+          ...options,
+          ...(twoDigits
+            ? [['language-menu-pound', 'Then press pound.'] as const]
+            : []),
         ),
       ),
     );
@@ -195,10 +262,16 @@ export async function handleVoiceWebhook(
       config.humanNumbers['default'] ??
       [];
     return [
-      say(
+      ...speak(
         entry === undefined
-          ? 'Connecting you to a human interpreter. Please hold.'
-          : `Connecting you to a human interpreter for ${entry.displayName}. Please hold.`,
+          ? [
+              'human-connecting',
+              'Connecting you to a human interpreter. Please hold.',
+            ]
+          : [
+              `human-connecting-${clipKey(entry.languageId)}`,
+              `Connecting you to a human interpreter for ${entry.displayName}. Please hold.`,
+            ],
       ),
       element(
         'Dial',
@@ -221,39 +294,55 @@ export async function handleVoiceWebhook(
     ];
   };
 
-  const connectAi = (
-    entry: MenuEntry,
-    intro = `You are connected to the FourPoints ${entry.displayName} AI Interpreter. ` +
-      'Please speak one person at a time. Press star when you are done.',
-  ): string[] => [
-    say(intro),
-    element(
-      'Connect',
-      { action: url('/voice/ai-ended', { lang: entry.languageId }) },
+  /**
+   * With a recorded greeting the stream opens at once and the gateway plays
+   * the greeting itself while the FourPoints session opens (call.ts), so
+   * the two waits overlap. Without one, Twilio says it first, as before.
+   * Presentation mode passes its own intro.
+   */
+  const connectAi = (entry: MenuEntry, intro?: string): string[] => {
+    const greeting =
+      intro === undefined
+        ? ctx.prompts?.match(...aiGreeting(entry))
+        : undefined;
+    return [
+      ...(greeting !== undefined
+        ? []
+        : intro !== undefined
+          ? [say(intro)]
+          : speak(aiGreeting(entry))),
       element(
-        'Stream',
-        {
-          // Twilio forbids query strings here; metadata goes in <Parameter>.
-          url: `${config.publicBaseUrl.replace(/^http/, 'ws')}/media`,
-          statusCallback: url('/voice/stream-status'),
-        },
-        element('Parameter', {
-          name: 'clinicianLanguageId',
-          value: config.clinicianLanguageId,
-        }),
-        element('Parameter', {
-          name: 'patientLanguageId',
-          value: entry.languageId,
-        }),
+        'Connect',
+        { action: url('/voice/ai-ended', { lang: entry.languageId }) },
+        element(
+          'Stream',
+          {
+            // Twilio forbids query strings here; metadata goes in <Parameter>.
+            url: `${config.publicBaseUrl.replace(/^http/, 'ws')}/media`,
+            statusCallback: url('/voice/stream-status'),
+          },
+          element('Parameter', {
+            name: 'clinicianLanguageId',
+            value: config.clinicianLanguageId,
+          }),
+          element('Parameter', {
+            name: 'patientLanguageId',
+            value: entry.languageId,
+          }),
+          ...(greeting === undefined
+            ? []
+            : [element('Parameter', { name: 'greeting', value: greeting.id })]),
+        ),
       ),
-    ),
-  ];
+    ];
+  };
 
   const callSid = body.get('CallSid') ?? '';
-  const goodbye = (text: string) =>
-    response(say(`${text} Goodbye.`), element('Hangup'));
+  const goodbye = (id: string, text: string) =>
+    response(...speak([id, `${text} Goodbye.`]), element('Hangup'));
   const notAvailable = () =>
     goodbye(
+      'org-not-available',
       'Phone interpretation is not available for your organization right now. Please contact your administrator.',
     );
 
@@ -321,9 +410,10 @@ export async function handleVoiceWebhook(
     if (!canHuman()) {
       return response(
         ...lead,
-        say(
+        ...speak([
+          'human-not-included',
           'A human interpreter is not included for your organization. Goodbye.',
-        ),
+        ]),
         element('Hangup'),
       );
     }
@@ -338,11 +428,9 @@ export async function handleVoiceWebhook(
       : notAvailable();
 
   const aiOrHuman = (entry: MenuEntry): Promise<string> =>
-    ctx.aiAvailable
-      ? ai(entry)
-      : human(entry, [say('The AI interpreter is not available right now.')]);
+    ctx.aiAvailable ? ai(entry) : human(entry, speak(AI_NOT_AVAILABLE));
 
-  const orgNumberPrompt = (tries: number, lead: string) =>
+  const orgNumberPrompt = (tries: number, lead: Line) =>
     response(
       element(
         'Gather',
@@ -355,7 +443,10 @@ export async function handleVoiceWebhook(
           actionOnEmptyResult: true,
           action: url('/voice/org/number', { attempt: tries }),
         },
-        say(`${lead}Please enter your organization ID, then press pound.`),
+        ...speak(lead, [
+          'org-id-prompt',
+          'Please enter your organization ID, then press pound.',
+        ]),
       ),
     );
   const codePrompt = (orgNumber: number, tries: number) =>
@@ -369,18 +460,16 @@ export async function handleVoiceWebhook(
           actionOnEmptyResult: true,
           action: url('/voice/org/code', { n: orgNumber, attempt: tries }),
         },
-        say('Please enter your six digit access code, then press pound.'),
+        ...speak([
+          'code-prompt',
+          'Please enter your six digit access code, then press pound.',
+        ]),
       ),
     );
   const notRecognized = () =>
     attempt >= MAX_ATTEMPTS
-      ? goodbye(
-          'Sorry, that organization ID or access code was not recognized.',
-        )
-      : orgNumberPrompt(
-          attempt + 1,
-          'Sorry, that organization ID or access code was not recognized. ',
-        );
+      ? response(...speak(CODE_NOT_RECOGNIZED, GOODBYE), element('Hangup'))
+      : orgNumberPrompt(attempt + 1, CODE_NOT_RECOGNIZED);
 
   /** The organization line's code check. Fails closed. */
   const checkCode = async (): Promise<string> => {
@@ -394,7 +483,10 @@ export async function handleVoiceWebhook(
       return notRecognized();
     }
     if (ctx.access === undefined) {
-      return goodbye('This line is not available right now.');
+      return goodbye(
+        'line-unavailable',
+        'This line is not available right now.',
+      );
     }
     let result;
     try {
@@ -402,6 +494,7 @@ export async function handleVoiceWebhook(
     } catch {
       log('access.resolve_failed');
       return goodbye(
+        'code-check-failed',
         'Sorry, we cannot check your access code right now. Please call again in a few minutes.',
       );
     }
@@ -414,6 +507,7 @@ export async function handleVoiceWebhook(
         return notAvailable();
       case 'QUOTA_EXHAUSTED':
         return goodbye(
+          'quota-exhausted',
           'Your organization has used all of its interpretation minutes for this month. Please contact your administrator.',
         );
       case 'OK':
@@ -434,6 +528,7 @@ export async function handleVoiceWebhook(
       return grant.human
         ? human(undefined)
         : goodbye(
+            'ai-try-later',
             'The AI interpreter is not available right now. Please try again later.',
           );
     }
@@ -511,7 +606,7 @@ export async function handleVoiceWebhook(
 
     case '/voice/org/incoming':
       grant = undefined;
-      return orgNumberPrompt(1, 'Welcome to FourPoints interpretation. ');
+      return orgNumberPrompt(1, WELCOME);
 
     case '/voice/org/number': {
       grant = undefined;
@@ -520,11 +615,14 @@ export async function handleVoiceWebhook(
         return codePrompt(orgNumber, attempt);
       }
       return attempt >= MAX_ATTEMPTS
-        ? goodbye('Sorry, we could not read your organization ID.')
-        : orgNumberPrompt(
-            attempt + 1,
-            'Sorry, that is not a valid organization ID. ',
-          );
+        ? goodbye(
+            'org-id-unreadable',
+            'Sorry, we could not read your organization ID.',
+          )
+        : orgNumberPrompt(attempt + 1, [
+            'org-id-invalid',
+            'Sorry, that is not a valid organization ID.',
+          ]);
     }
 
     case '/voice/org/code':
@@ -536,9 +634,7 @@ export async function handleVoiceWebhook(
         if (menu.entries.length === 0) {
           return human(
             undefined,
-            digits === '1'
-              ? [say('The AI interpreter is not available right now.')]
-              : [],
+            digits === '1' ? speak(AI_NOT_AVAILABLE) : [],
           );
         }
         return languageMenu(digits === '1' ? 'ai' : 'human', 1);
@@ -574,7 +670,7 @@ export async function handleVoiceWebhook(
         !ctx.aiAvailable ||
         !canAi()
       ) {
-        return response(say('Goodbye.'), element('Hangup'));
+        return response(...speak(GOODBYE), element('Hangup'));
       }
       return ai(language);
 
@@ -585,7 +681,10 @@ export async function handleVoiceWebhook(
       if (body.get('CallStatus') === 'completed') {
         return response();
       }
-      return human(language, [say('The AI interpreter is unavailable.')]);
+      return human(
+        language,
+        speak(['ai-unavailable', 'The AI interpreter is unavailable.']),
+      );
 
     case '/voice/human-result':
       await endLeg('HUMAN');
@@ -594,7 +693,10 @@ export async function handleVoiceWebhook(
       }
       if (language !== undefined && ctx.aiAvailable && canAi()) {
         return response(
-          say('Sorry, no interpreter is available right now.'),
+          ...speak([
+            'no-interpreter',
+            'Sorry, no interpreter is available right now.',
+          ]),
           element(
             'Gather',
             {
@@ -603,16 +705,20 @@ export async function handleVoiceWebhook(
               timeout: 6,
               action: url('/voice/ai', { lang: language.languageId }),
             },
-            say('To use the AI interpreter instead, press 1.'),
+            ...speak([
+              'offer-ai',
+              'To use the AI interpreter instead, press 1.',
+            ]),
           ),
-          say('Goodbye.'),
+          ...speak(GOODBYE),
           element('Hangup'),
         );
       }
       return response(
-        say(
+        ...speak([
+          'no-interpreter-final',
           'Sorry, no interpreter is available right now. Please try again later. Goodbye.',
-        ),
+        ]),
         element('Hangup'),
       );
 
@@ -628,9 +734,16 @@ export async function handleVoiceWebhook(
             timeout: 8,
             action: url('/voice/whisper-accept'),
           },
-          say(
-            `FourPoints interpretation call${language === undefined ? '' : ` for ${language.displayName}`}. ` +
-              'Press 1 to accept.',
+          ...speak(
+            language === undefined
+              ? [
+                  'whisper',
+                  'FourPoints interpretation call. Press 1 to accept.',
+                ]
+              : [
+                  `whisper-${clipKey(language.languageId)}`,
+                  `FourPoints interpretation call for ${language.displayName}. Press 1 to accept.`,
+                ],
           ),
         ),
         element('Hangup'),

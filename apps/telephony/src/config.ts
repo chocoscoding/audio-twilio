@@ -1,4 +1,11 @@
+import { fileURLToPath } from 'node:url';
+
 import type { VadConfig } from './vad.js';
+
+/** Approved recorded prompts, ivr-audio/final (same depth from src/ and dist/). */
+export const BUNDLED_PROMPTS_DIR = fileURLToPath(
+  new URL('../../../ivr-audio/final', import.meta.url),
+);
 
 /** Silence that ends a caller's turn unless VAD_HANGOVER_MS overrides it. */
 export const PHONE_HANGOVER_MS = 1150;
@@ -54,6 +61,11 @@ export interface TelephonyConfig {
   detectSpeakerLanguage: boolean;
   /** Language names read in the presentation-mode menu, in order. */
   presentationLanguages: string[];
+  /**
+   * Recorded prompts folder (manifest.json + μ-law WAVs). PROMPTS_DIR=off
+   * turns them off: every line is a Twilio <Say> again.
+   */
+  promptsDir: string | undefined;
 }
 
 const DEFAULT_PRESENTATION_LANGUAGES = [
@@ -278,6 +290,9 @@ export function loadConfig(
       presentationLanguages.length > 0
         ? presentationLanguages
         : DEFAULT_PRESENTATION_LANGUAGES,
+    promptsDir: ((dir) => (dir === 'off' ? undefined : dir))(
+      read('PROMPTS_DIR', BUNDLED_PROMPTS_DIR),
+    ),
   };
 
   if (problems.length > 0) {

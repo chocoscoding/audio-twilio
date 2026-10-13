@@ -57,9 +57,19 @@ describe('buildMenu', () => {
       'zh-CN',
       'ar-AE',
     ]);
-    expect(menu.entries.map((e) => e.digits)).toEqual(
-      Array.from({ length: 10 }, (_, i) => String(i + 1)),
-    );
+    // Ten languages: one key each, the tenth on 0.
+    expect(menu.entries.map((e) => e.digits)).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+      '7',
+      '8',
+      '9',
+      '0',
+    ]);
   });
 
   it('puts configured languages first, in order', () => {
@@ -127,8 +137,8 @@ describe('buildMenu', () => {
 
   it('finds entries by digits and by language', () => {
     const menu = buildMenu(FOURPOINTS_LANGUAGES, 'en-US');
-    expect(findByDigits(menu, '10')?.languageId).toBe('ar-AE');
-    expect(findByDigits(menu, '11')).toBeUndefined();
+    expect(findByDigits(menu, '0')?.languageId).toBe('ar-AE');
+    expect(findByDigits(menu, '10')).toBeUndefined();
     expect(findByLanguage(menu, 'ja-JP')?.digits).toBe('7');
     expect(findByLanguage(menu, 'en-US')).toBeUndefined();
   });

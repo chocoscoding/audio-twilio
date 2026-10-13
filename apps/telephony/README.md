@@ -19,11 +19,19 @@ Twilio number ──HTTPS webhooks──► gateway: IVR  (press 1 AI / 2 human 
 
 1. **IVR** — "For an AI interpreter, press 1. For a human interpreter, press 2."
    Then a language menu read from the FourPoints language registry (only
-   languages FourPoints can hear and speak; up to 14; two-digit entries end
-   with `#`). Invalid input re-prompts three times, then reaches a human.
-2. **AI path** — Twilio opens a media stream to the gateway, which opens one
-   FourPoints session (`session.start` → `conversation.start`, clinician
-   language = `CLINICIAN_LANGUAGE_ID`).
+   languages FourPoints can hear and speak; up to 10 are one key each, the
+   tenth on 0; 11–14 use two digits ending with `#`). Invalid input
+   re-prompts three times, then reaches a human.
+   Every line is a **recorded prompt** (`ivr-audio/`, one voice, served at
+   `/prompts/<id>.wav` for `<Play>` and cached by Twilio), so nothing is
+   synthesized during the call. A line whose clip is missing or no longer
+   says exactly what the code would say falls back to `<Say>`.
+2. **AI path** — Twilio opens a media stream to the gateway at once. The
+   gateway plays the greeting (English, then the caller's language) while it
+   opens one FourPoints session (`session.start` → `conversation.start`,
+   clinician language = `CLINICIAN_LANGUAGE_ID`); if the session is still not
+   ready 0.4 s after the greeting, hold music loops until it is, then stops
+   instantly (`clear`) and the first tone plays.
 3. **Taking turns** — a phone has no screen, so tones hand over the floor:
    **low tone** = clinician speaks, **high tone** = patient speaks, **double
    beep** = "not translated, please repeat". **Star** switches who speaks next.

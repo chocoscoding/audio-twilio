@@ -29,17 +29,29 @@ import {
 } from './fourpoints.js';
 import { findByLanguage, type LanguageMenu } from './languages.js';
 import { log, redactId } from './log.js';
+import type { PromptClip, PromptLibrary } from './prompts.js';
 import { EnergyVad } from './vad.js';
 
 /** Twilio must send `start` promptly after connecting. */
 const START_TIMEOUT_MS = 5_000;
 /** FourPoints caps a session at 200 turns; rotate before reaching it. */
 const MAX_TURNS_PER_SESSION = 190;
+/** Recorded audio goes to Twilio in 200 ms messages. */
+const CLIP_CHUNK_BYTES = 1600;
+/** Hold music starts only if FourPoints is still not ready this long after the greeting. */
+const HOLD_MUSIC_DELAY_MS = 400;
+/** Hold music is kept this far ahead of playback, so stopping it is near-instant. */
+const HOLD_MUSIC_LEAD_MS = 1_000;
+/** Never wait on a greeting's mark longer than its length plus this. */
+const GREETING_MARK_SLACK_MS = 3_000;
+const GREETING_MARK = 'greeting';
 
 export interface CallOptions {
   config: TelephonyConfig;
   target: FourPointsTarget;
   menu: () => LanguageMenu;
+  /** Recorded greeting and hold music; without them the stream starts silent. */
+  prompts?: PromptLibrary;
   onEnd: () => void;
 }
 
@@ -79,6 +91,14 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
         ).toString('base64'),
       },
     });
+  const playClip = (mulaw: Uint8Array) => {
+    for (let i = 0; i < mulaw.length; i += CLIP_CHUNK_BYTES) {
+      play(mulaw.subarray(i, i + CLIP_CHUNK_BYTES));
+    }
+  };
+  // The greeting's own mark; the floor's marks are counted separately.
+  let greetingPlayed: (() => void) | undefined;
+  let stopHoldMusic: (() => void) | undefined;
   // Twilio echoes a mark once everything queued before it has played.
   const mark = () => {
     pendingMarks += 1;
@@ -236,6 +256,8 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
     }
     ended = true;
     clearTimeout(startTimer);
+    stopHoldMusic?.();
+    greetingPlayed?.();
     floor.stop();
     session?.close();
     session = undefined;
@@ -279,12 +301,90 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
       call: callId,
       patientLanguageId: patient.languageId,
     });
-    if (await ensureSession()) {
-      if (!ended) {
-        floor.start();
-      }
+    // The FourPoints session opens while the greeting plays: the caller
+    // hears the greeting instead of silence, and the first tone follows it
+    // as soon as both are done.
+    const ready = ensureSession();
+    const greetingId = params['greeting'];
+    const greeting =
+      typeof greetingId === 'string' && greetingId.startsWith('ai-connected-')
+        ? options.prompts?.clip(greetingId)
+        : undefined;
+    if (greeting !== undefined) {
+      await playGreeting(greeting);
+    }
+    const ok = await holdMusicUntil(ready);
+    if (ended) {
+      return;
+    }
+    if (ok) {
+      floor.start();
     } else {
       endStream('fourpoints_unavailable');
+    }
+  };
+
+  /** Play the greeting; resolves once Twilio reports it played (or the call ends). */
+  const playGreeting = (greeting: PromptClip): Promise<void> =>
+    new Promise((resolve) => {
+      const timer = setTimeout(
+        () => greetingPlayed?.(),
+        greeting.mulaw.length / 8 + GREETING_MARK_SLACK_MS,
+      );
+      greetingPlayed = () => {
+        clearTimeout(timer);
+        greetingPlayed = undefined;
+        resolve();
+      };
+      playClip(greeting.mulaw);
+      toTwilio({ event: 'mark', streamSid, mark: { name: GREETING_MARK } });
+    });
+
+  /**
+   * Loop hold music until `ready` settles, unless it settles within
+   * HOLD_MUSIC_DELAY_MS. Music is paced a second ahead of playback and
+   * cut with `clear`, so the first tone is never late behind queued music.
+   */
+  const holdMusicUntil = async (ready: Promise<boolean>): Promise<boolean> => {
+    const music = options.prompts?.clip('hold-music');
+    let settled = false;
+    const watched = ready.finally(() => {
+      settled = true;
+    });
+    if (music === undefined || music.mulaw.length === 0) {
+      return watched;
+    }
+    await Promise.race([
+      watched,
+      new Promise((resolve) => setTimeout(resolve, HOLD_MUSIC_DELAY_MS)),
+    ]);
+    if (settled || ended) {
+      return watched;
+    }
+    log('call.hold_music', { call: callId });
+    const started = Date.now();
+    let sentMs = 0;
+    let offset = 0;
+    let timer: NodeJS.Timeout | undefined;
+    const pump = () => {
+      while (sentMs < Date.now() - started + HOLD_MUSIC_LEAD_MS) {
+        const chunk = music.mulaw.subarray(offset, offset + CLIP_CHUNK_BYTES);
+        play(chunk);
+        sentMs += chunk.length / 8;
+        offset = (offset + chunk.length) % music.mulaw.length;
+      }
+      timer = setTimeout(pump, 200);
+    };
+    stopHoldMusic = () => {
+      clearTimeout(timer);
+      stopHoldMusic = undefined;
+      toTwilio({ event: 'clear', streamSid });
+    };
+    pump();
+    try {
+      return await watched;
+    } finally {
+      stopHoldMusic?.();
     }
   };
 
@@ -329,10 +429,16 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
         }
         break;
       }
-      case 'mark':
+      case 'mark': {
+        const name = isJson(message['mark']) ? message['mark']['name'] : '';
+        if (name === GREETING_MARK) {
+          greetingPlayed?.();
+          break;
+        }
         pendingMarks = Math.max(0, pendingMarks - 1);
         floor.playbackDrained();
         break;
+      }
       case 'stop':
         endCall('twilio_stop');
         break;

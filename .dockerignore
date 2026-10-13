@@ -27,7 +27,10 @@ eslint.config.mjs
 .prettierrc.json
 .prettierignore
 
-# Local media/scratch that must never be baked in (no audio in images).
+# Local media/scratch that must never be baked in (no caller audio in images).
 **/*.wav
 **/*.mp3
 **/*.pcm
+# The one exception: approved, synthetic IVR prompts (ivr-audio/final, see
+# TELEPHONY-009). No caller audio; ivr-audio/review stays excluded.
+!ivr-audio/final/*.wav

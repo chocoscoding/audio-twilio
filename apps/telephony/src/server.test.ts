@@ -24,6 +24,7 @@ import { createAuthHeaders } from './auth.js';
 import { loadConfig, type TelephonyConfig } from './config.js';
 import { fetchLanguages, type FourPointsTarget } from './fourpoints.js';
 import { LanguageRegistry } from './languages.js';
+import { PromptLibrary } from './prompts.js';
 import { createTelephonyServer, type TelephonyServer } from './server.js';
 import { twilioSignature } from './twilio-signature.js';
 
@@ -53,7 +54,10 @@ interface FakeFourPoints {
   close(): Promise<void>;
 }
 
-async function startFakeFourPoints(): Promise<FakeFourPoints> {
+/** `sessionDelayMs`: how long FourPoints takes to answer session.start. */
+async function startFakeFourPoints(
+  sessionDelayMs = 0,
+): Promise<FakeFourPoints> {
   const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await once(wss, 'listening');
   const fake: FakeFourPoints = {
@@ -79,17 +83,19 @@ async function startFakeFourPoints(): Promise<FakeFourPoints> {
       const message = parseClientMessage(data.toString());
       switch (message?.type) {
         case 'session.start':
-          send({
-            type: 'session.ready',
-            protocolVersion: PROTOCOL_VERSION,
-            sessionId: 's1',
-          });
-          send({
-            type: 'languages.available',
-            languages: [voice('en-US'), voice('es-US')],
-            defaultClinicianLanguageId: 'en-US',
-            defaultPatientLanguageId: 'es-US',
-          });
+          setTimeout(() => {
+            send({
+              type: 'session.ready',
+              protocolVersion: PROTOCOL_VERSION,
+              sessionId: 's1',
+            });
+            send({
+              type: 'languages.available',
+              languages: [voice('en-US'), voice('es-US')],
+              defaultClinicianLanguageId: 'en-US',
+              defaultPatientLanguageId: 'es-US',
+            });
+          }, sessionDelayMs);
           break;
         case 'conversation.start':
           send({ type: 'conversation.ready', conversationId: 'c1' });
@@ -366,5 +372,170 @@ describe('telephony gateway (integration)', () => {
     // The FourPoints edge WAF rejects upgrades that carry no User-Agent.
     expect(fake.userAgent.at(-1)).toBe('fourpoints-telephony');
     expect(fetchImpl).toHaveBeenCalledTimes(1); // token reused
+  });
+});
+
+describe('recorded prompts (integration)', () => {
+  // 0.4 s greeting and 0.2 s of hold music, as distinct byte values.
+  const prompts = PromptLibrary.of([
+    {
+      id: 'ai-connected-es-us',
+      text: 'You are connected to the es-US AI Interpreter.',
+      mulaw: new Uint8Array(3200).fill(0x11),
+    },
+    {
+      id: 'hold-music',
+      text: 'Hold music',
+      mulaw: new Uint8Array(1600).fill(0x22),
+    },
+  ]);
+  let fake: FakeFourPoints;
+  let gateway: TelephonyServer;
+
+  async function start(sessionDelayMs: number) {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    fake = await startFakeFourPoints(sessionDelayMs);
+    const config = baseConfig(fake.url);
+    const target = {
+      url: config.fourPointsUrl,
+      authHeaders: createAuthHeaders(config.fourPointsAuth),
+    };
+    const registry = new LanguageRegistry({
+      fetchLanguages: () => fetchLanguages(target),
+      clinicianLanguageId: 'en-US',
+      order: [],
+      refreshMs: 60_000,
+    });
+    await registry.refresh();
+    gateway = await createTelephonyServer({
+      config,
+      target,
+      menu: () => registry.menu,
+      prompts,
+    });
+  }
+
+  afterEach(async () => {
+    await gateway.close(0);
+    await fake.close();
+    vi.restoreAllMocks();
+  });
+
+  /** Opens a stream with the greeting and records what the gateway sends, in order. */
+  async function call() {
+    const ws = new WebSocket(`ws://127.0.0.1:${gateway.port}/media`, {
+      headers: {
+        'x-twilio-signature': twilioSignature(TOKEN, 'ws://gateway.test/media'),
+      },
+    });
+    await once(ws, 'open');
+    const events: {
+      event: string;
+      byte?: number;
+      bytes?: number;
+      mark?: string;
+    }[] = [];
+    let waiter: (() => void) | undefined;
+    ws.on('message', (data) => {
+      const m = JSON.parse(data.toString()) as {
+        event: string;
+        media?: { payload: string };
+        mark?: { name: string };
+      };
+      const payload =
+        m.media === undefined
+          ? undefined
+          : Buffer.from(m.media.payload, 'base64');
+      events.push({
+        event: m.event,
+        ...(payload === undefined
+          ? {}
+          : { byte: payload[0], bytes: payload.length }),
+        ...(m.mark === undefined ? {} : { mark: m.mark.name }),
+      });
+      waiter?.();
+    });
+    const until = async (test: () => boolean) => {
+      while (!test()) {
+        await new Promise<void>((resolve) => (waiter = resolve));
+      }
+    };
+    const echo = (name: string) =>
+      ws.send(
+        JSON.stringify({ event: 'mark', streamSid: 'MZ1', mark: { name } }),
+      );
+    ws.send(
+      JSON.stringify({
+        event: 'start',
+        streamSid: 'MZ1',
+        start: {
+          accountSid: ACCOUNT_SID,
+          streamSid: 'MZ1',
+          callSid: 'CA1',
+          customParameters: {
+            clinicianLanguageId: 'en-US',
+            patientLanguageId: 'es-US',
+            greeting: 'ai-connected-es-us',
+          },
+        },
+      }),
+    );
+    return { ws, events, until, echo };
+  }
+
+  const bytesOf = (events: { byte?: number; bytes?: number }[], byte: number) =>
+    events
+      .filter((e) => e.byte === byte)
+      .reduce((n, e) => n + (e.bytes ?? 0), 0);
+
+  it('plays the greeting, then hold music until FourPoints is ready, then the first tone', async () => {
+    await start(1_500);
+    const { ws, events, until, echo } = await call();
+    try {
+      await until(() => events.some((e) => e.mark === 'greeting'));
+      expect(bytesOf(events, 0x11)).toBe(3200); // the whole greeting, first
+      echo('greeting');
+      await until(() => events.some((e) => e.mark === 'm1'));
+      const clear = events.findIndex((e) => e.event === 'clear');
+      const greeting = events.findIndex((e) => e.mark === 'greeting');
+      expect(clear).toBeGreaterThan(greeting);
+      // Music between the greeting and the clear; the clinician tone after it.
+      expect(bytesOf(events.slice(greeting, clear), 0x22)).toBeGreaterThan(0);
+      expect(events.slice(clear).some((e) => e.byte === 0x22)).toBe(false);
+      expect(events.slice(clear).reduce((n, e) => n + (e.bytes ?? 0), 0)).toBe(
+        CUES.clinician.length,
+      );
+    } finally {
+      ws.close();
+    }
+  }, 10_000);
+
+  it('goes straight from the greeting to the first tone when FourPoints is already ready', async () => {
+    await start(0);
+    const { ws, events, until, echo } = await call();
+    try {
+      await until(() => events.some((e) => e.mark === 'greeting'));
+      await new Promise((resolve) => setTimeout(resolve, 100)); // session opens meanwhile
+      echo('greeting');
+      await until(() => events.some((e) => e.mark === 'm1'));
+      expect(events.some((e) => e.event === 'clear')).toBe(false);
+      expect(bytesOf(events, 0x22)).toBe(0);
+    } finally {
+      ws.close();
+    }
+  }, 10_000);
+
+  it('serves prompt files for <Play>, cacheable, and nothing else', async () => {
+    await start(0);
+    const base = `http://127.0.0.1:${gateway.port}`;
+    const ok = await fetch(`${base}/prompts/hold-music.wav`);
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get('content-type')).toBe('audio/wav');
+    expect(ok.headers.get('cache-control')).toContain('immutable');
+    const wav = Buffer.from(await ok.arrayBuffer());
+    expect(wav.toString('ascii', 0, 4)).toBe('RIFF');
+    expect(wav.length).toBe(46 + 1600);
+    expect((await fetch(`${base}/prompts/nope.wav`)).status).toBe(404);
+    expect((await fetch(`${base}/prompts/../manifest.json`)).status).toBe(404);
   });
 });

@@ -238,7 +238,7 @@ describe('organization line', () => {
         Digits: '',
       },
     );
-    expect(empty).toContain('You have not made a choice.');
+    expect(empty).toContain('You have not made a choice yet.');
     expect(empty).not.toContain('not a valid choice');
     const wrong = await hook(
       '/voice/mode',

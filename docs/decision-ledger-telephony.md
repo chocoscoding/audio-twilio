@@ -137,3 +137,31 @@ Tradeoff: ~0.5 s more per turn before translation; sub-second answers are
   before. Star still switches the expected speaker by hand.
 Status: ACCEPTED (owner)
 ```
+
+```text
+Decision ID: TELEPHONY-009
+Decision: IVR prompts are pre-recorded (ElevenLabs eleven_v4, voice Lauren B,
+  8 kHz μ-law WAV, ivr-audio/) and played with <Play> from
+  /prompts/<id>.wav?v=<content hash>, instead of Twilio <Say>. A clip is
+  used only when its text equals the line the code would say; otherwise
+  that line is a <Say>. The AI greeting (English, then the caller's
+  language) is played by the gateway into the media stream while the
+  FourPoints session opens, with hold music if it is still opening. Up to
+  ten menu languages are one key each (tenth = 0).
+Reason: Owner, 2026-10-13: callers complained of long, odd silences after
+  each choice and before the AI interpreter; <Say> is synthesized per call,
+  and the session was opened only after the greeting finished. A two-digit
+  menu also made every caller wait 3 s for a possible second digit.
+Evidence: prompts tests (clip/text matching, every IVR line covered by an
+  approved clip); integration tests (greeting → hold music → clear → first
+  tone; no music when FourPoints is ready; /prompts route); ivr tests for
+  one-key and two-digit menus. Each clip's transcript was checked against
+  its text with ElevenLabs speech-to-text before approval.
+Tradeoff: Changing a line or the menu order needs a regenerated clip (until
+  then that line falls back to <Say> in another voice). Non-English greeting
+  text was drafted, not professionally translated: native review needed
+  before patient calls. The prompt WAVs ship in the gateway image: the
+  .dockerignore "no audio in images" rule keeps excluding everything except
+  ivr-audio/final (synthetic, approved prompts; no caller audio).
+Status: PROPOSED
+```

@@ -11,6 +11,7 @@ import { fetchLanguages, type FourPointsTarget } from './fourpoints.js';
 import { LanguageRegistry, staticMenu } from './languages.js';
 import { log } from './log.js';
 import { openPresentationLogs } from './presentation-log.js';
+import { PromptLibrary } from './prompts.js';
 import { createTelephonyServer } from './server.js';
 
 const LANGUAGE_REFRESH_MS = 5 * 60_000;
@@ -59,11 +60,27 @@ if (!config.presentationMode) {
   registry.start();
 }
 
+// Recorded prompts. Missing or broken files are not fatal: those lines are
+// spoken by Twilio <Say> instead, exactly as before recordings existed.
+let prompts = PromptLibrary.empty;
+if (config.promptsDir !== undefined) {
+  try {
+    prompts = PromptLibrary.load(config.promptsDir, (id, reason) =>
+      log('prompts.skipped', { id, reason }),
+    );
+  } catch (error) {
+    log('prompts.unavailable', {
+      reason: error instanceof Error ? error.message : 'unknown',
+    });
+  }
+}
+
 const server = await createTelephonyServer({
   config,
   target,
   menu: () => (config.presentationMode ? presentationMenu : registry.menu),
   ...(access === undefined ? {} : { access }),
+  prompts,
 });
 log('telephony.listening', {
   port: server.port,
@@ -72,6 +89,7 @@ log('telephony.listening', {
   auth: config.fourPointsAuth.mode,
   organizationLine: access !== undefined,
   maxCalls: config.maxCalls,
+  recordedPrompts: prompts.size,
 });
 
 let stopping = false;

@@ -1,6 +1,8 @@
 /**
  * HTTP + WebSocket front door:
  *   GET  /healthz   liveness; 503 while draining
+ *   GET  /prompts/<id>.wav  recorded prompts for <Play>; public, no call
+ *                   data, cached for a year (the URL carries a content hash)
  *   POST /voice/*   Twilio webhooks → TwiML (signature-checked); the
  *                   organization line (/voice/org/*) also calls FourPoints
  *   WS   /media     Twilio bidirectional Media Streams (signature-checked)
@@ -26,6 +28,7 @@ import type { FourPointsTarget } from './fourpoints.js';
 import { handleVoiceWebhook } from './ivr.js';
 import type { LanguageMenu } from './languages.js';
 import { log } from './log.js';
+import type { PromptLibrary } from './prompts.js';
 import {
   describeTwiml,
   describeWebhook,
@@ -45,6 +48,8 @@ export interface TelephonyServerOptions {
   menu: () => LanguageMenu;
   /** FourPoints phone API; without it the organization line says "not available". */
   access?: AccessClient;
+  /** Recorded prompts; without them every line is a <Say>. */
+  prompts?: PromptLibrary;
 }
 
 export interface TelephonyServer {
@@ -112,6 +117,25 @@ export async function createTelephonyServer(
       );
       return;
     }
+    const promptPath = /^\/prompts\/([a-z0-9-]{1,64})\.wav$/.exec(url.pathname);
+    if (
+      (req.method === 'GET' || req.method === 'HEAD') &&
+      promptPath !== null
+    ) {
+      const clip = options.prompts?.clip(promptPath[1] ?? '');
+      if (clip === undefined) {
+        reply(res, 404, 'text/plain', 'Not found');
+        return;
+      }
+      res.writeHead(200, {
+        'content-type': 'audio/wav',
+        'content-length': clip.wav.length,
+        'cache-control': 'public, max-age=31536000, immutable',
+        etag: `"${clip.version}"`,
+      });
+      res.end(req.method === 'HEAD' ? undefined : clip.wav);
+      return;
+    }
     if (req.method !== 'POST' || !url.pathname.startsWith('/voice/')) {
       reply(res, 404, 'text/plain', 'Not found');
       return;
@@ -150,6 +174,7 @@ export async function createTelephonyServer(
         menu: options.menu(),
         aiAvailable: aiAvailable(),
         ...(options.access === undefined ? {} : { access: options.access }),
+        ...(options.prompts === undefined ? {} : { prompts: options.prompts }),
         log,
       },
     );
@@ -229,6 +254,7 @@ export async function createTelephonyServer(
         config,
         target: options.target,
         menu: options.menu,
+        ...(options.prompts === undefined ? {} : { prompts: options.prompts }),
         onEnd: () => {
           activeCalls -= 1;
         },
