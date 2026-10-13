@@ -128,6 +128,9 @@ describe('organization line', () => {
     expect(first).not.toContain('numDigits');
     expect(second).toContain('finishOnKey="#"');
     expect(second).not.toContain('numDigits');
+    // Time to think: 12 s before the first digit and between digits.
+    expect(first).toContain('finishOnKey="#" timeout="12"');
+    expect(second).toContain('finishOnKey="#" timeout="12"');
     expect(second).toContain(
       `action="${BASE}/voice/org/code?n=10&amp;attempt=1"`,
     );

@@ -69,6 +69,14 @@ export const aiGreeting = (entry: MenuEntry): Line => [
 ];
 
 const MAX_ATTEMPTS = 3;
+/**
+ * Seconds Twilio waits for a key — before the first and between digits —
+ * after the prompt ends. Callers said 6 s felt rushed (owner, 2026-10-13).
+ * Pound still ends an entry at once, so a longer wait slows no one down.
+ */
+const MENU_TIMEOUT_S = 10;
+/** Organization ID and access code: several digits, often read off a card. */
+const ENTRY_TIMEOUT_S = 12;
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CALL_SID = /^CA[0-9a-f]{32}$/;
 
@@ -203,7 +211,7 @@ export async function handleVoiceWebhook(
         {
           input: 'dtmf',
           numDigits: 1,
-          timeout: orgLine() ? 10 : 6,
+          timeout: MENU_TIMEOUT_S,
           ...(orgLine() ? { finishOnKey: '' } : {}),
           actionOnEmptyResult: true,
           action: url('/voice/mode', { attempt: tries }),
@@ -234,7 +242,7 @@ export async function handleVoiceWebhook(
           input: 'dtmf',
           numDigits: twoDigits ? 2 : 1,
           finishOnKey: '#',
-          timeout: twoDigits ? 3 : orgLine() ? 10 : 6,
+          timeout: twoDigits ? 3 : MENU_TIMEOUT_S,
           actionOnEmptyResult: true,
           action: url('/voice/select', {
             mode: menuMode,
@@ -439,7 +447,7 @@ export async function handleVoiceWebhook(
           // never left over for the next menu. Silence also ends it.
           input: 'dtmf',
           finishOnKey: '#',
-          timeout: 6,
+          timeout: ENTRY_TIMEOUT_S,
           actionOnEmptyResult: true,
           action: url('/voice/org/number', { attempt: tries }),
         },
@@ -456,7 +464,7 @@ export async function handleVoiceWebhook(
         {
           input: 'dtmf',
           finishOnKey: '#',
-          timeout: 6,
+          timeout: ENTRY_TIMEOUT_S,
           actionOnEmptyResult: true,
           action: url('/voice/org/code', { n: orgNumber, attempt: tries }),
         },
@@ -702,7 +710,7 @@ export async function handleVoiceWebhook(
             {
               input: 'dtmf',
               numDigits: 1,
-              timeout: 6,
+              timeout: MENU_TIMEOUT_S,
               action: url('/voice/ai', { lang: language.languageId }),
             },
             ...speak([

@@ -66,7 +66,7 @@ async function hook(
 describe('IVR webhooks', () => {
   it('greets with the AI / human choice', async () => {
     expect(await hook('/voice/incoming')).toContain(
-      `<Gather input="dtmf" numDigits="1" timeout="6" actionOnEmptyResult="true" action="${BASE}/voice/mode?attempt=1">`,
+      `<Gather input="dtmf" numDigits="1" timeout="10" actionOnEmptyResult="true" action="${BASE}/voice/mode?attempt=1">`,
     );
   });
 
@@ -79,7 +79,7 @@ describe('IVR webhooks', () => {
   it('reads the language menu from the registry, one key per language', async () => {
     const twiml = await hook('/voice/mode', { attempt: '1' }, { Digits: '1' });
     // Ten languages: no second digit to wait for — the tenth is 0.
-    expect(twiml).toContain('numDigits="1" finishOnKey="#" timeout="6"');
+    expect(twiml).toContain('numDigits="1" finishOnKey="#" timeout="10"');
     expect(twiml).toContain(
       `action="${BASE}/voice/select?mode=ai&amp;v=${menu.version}&amp;attempt=1"`,
     );
