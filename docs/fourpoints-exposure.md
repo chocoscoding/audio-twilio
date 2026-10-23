@@ -1,5 +1,10 @@
 # FourPoints exposure request — telephony gateway
 
+> **Done (historical).** Staging FourPoints now accepts the gateway's machine
+> login on `/ws/telephony` (FourPoints `telephonyGateway=enabled`), and the
+> gateway runs on Helicarrier against it. Kept as the record of the request;
+> see `DEPLOY.md` for how it runs today.
+
 **Ask:** let one server-side client, the telephony gateway, open realtime
 WebSocket sessions on the deployed stack. This is an infrastructure/config
 change only: **no application code, protocol, or browser-path change.**

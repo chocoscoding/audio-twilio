@@ -51,13 +51,13 @@ Human → AI `###` also needs `TWILIO_ACCOUNT_CLIENT_SID` / `TWILIO_ACCOUNT_CLIE
 the gateway and outbound access to `api.twilio.com`. Full steps:
 [apps/telephony/README.md](apps/telephony/README.md#set-up-a-company-number).
 
-| Path                                | What it is                                                       |
-| ----------------------------------- | ---------------------------------------------------------------- |
-| `apps/telephony/`                   | The gateway — all new code. **Start with its README.**           |
-| `packages/protocol/`                | Byte-identical copy of the FourPoints wire protocol. Never edit. |
-| `docs/fourpoints-exposure.md`       | The only change deployed FourPoints needs (infrastructure only). |
-| `docs/decision-ledger-telephony.md` | Decisions, in FourPoints Decision Ledger format.                 |
-| `docs/migration.md`                 | How to move the app into the FourPoints monorepo.                |
+| Path                                | What it is                                                            |
+| ----------------------------------- | --------------------------------------------------------------------- |
+| `apps/telephony/`                   | The gateway — all new code. **Start with its README.**                |
+| `packages/protocol/`                | Byte-identical copy of the FourPoints wire protocol. Never edit.      |
+| `docs/fourpoints-exposure.md`       | Historical: the FourPoints route the gateway needed (now on staging). |
+| `docs/decision-ledger-telephony.md` | Decisions, in FourPoints Decision Ledger format.                      |
+| `docs/migration.md`                 | How to move the app into the FourPoints monorepo.                     |
 
 ```bash
 npm install

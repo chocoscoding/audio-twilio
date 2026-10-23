@@ -6,27 +6,78 @@ WebSocket. It is one stateless Node container; FourPoints does all the
 speech recognition, translation and speech output.
 
 ```
-Caller ── Twilio ──HTTPS/WSS──▶ gateway (:8080) ──WSS──▶ FourPoints realtime (/ws)
-                  /voice/*, /media                       conversation.start {clinician, patient}
+Caller ── Twilio ──HTTPS/WSS──▶ gateway (:8080) ──WSS──▶ FourPoints realtime (/ws/telephony)
+                  /voice/*, /media, /watch                conversation.start {clinician, patient}
 ```
 
-## Where things stand
+## Where it runs: Helicarrier
 
-| Setup                                        | Status                                                                                          |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Local backend + gateway + cloudflared tunnel | **Works today** — see "Run it now" below.                                                       |
-| Gateway in the cloud + deployed FourPoints   | **Blocked on FourPoints.** The deployed backend only accepts browser (Cognito) logins on `/ws`. |
+| What           | Value                                                                                                 |
+| -------------- | ----------------------------------------------------------------------------------------------------- |
+| Project        | `fourpoints` (Helicarrier), environment `production`                                                  |
+| Service        | `telephony`, one replica, plan `heli-s2`                                                              |
+| Public address | `https://telephony.on.helicarrier.xyz`                                                                |
+| Built from     | GitHub `chocoscoding/audio-twilio`, branch `master`, `apps/telephony/Dockerfile`                      |
+| Talks to       | staging FourPoints: `wss://staging.fourpointsls.com/ws/telephony` (machine login) and the staging API |
 
-Before the gateway can talk to the deployed backend, FourPoints needs a
-telephony route that accepts a machine token (Cognito client credentials). No
-such route exists in the FourPoints CDK yet. Any new route must follow
-FourPoints ADR 0002 (`docs/architecture/adr/0002-twilio-media-ingress.md`):
-its own path and listener rule, `/ws` never weakened.
-`docs/fourpoints-exposure.md` sketches the idea but is out of date — the
-backend now refuses to start with `REQUIRE_AUTH` unset, and the listener
-priority it proposes is already taken.
+**A push to `master` is a deploy.** Helicarrier builds and replaces the
+running gateway on every push (about a minute), so every caller on the phone
+line gets the new code at once. Commit freely, but push only what should go
+live, after `npm run build && npm test && npm run lint` pass.
 
-## Run it now (local backend, public tunnel)
+**Settings live in Helicarrier, not in the repo.** Service → environment
+variables. A setting changed there takes effect on the next deploy or
+restart. The keys set today (values hidden):
+
+| Group      | Keys                                                                                                                                                         |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Twilio     | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_ACCOUNT_CLIENT_SID`, `TWILIO_ACCOUNT_CLIENT_SECRET`                                                       |
+| FourPoints | `FOURPOINTS_WS_URL`, `FOURPOINTS_AUTH`, `FOURPOINTS_TOKEN_URL`, `FOURPOINTS_CLIENT_ID`, `FOURPOINTS_CLIENT_SECRET`, `FOURPOINTS_SCOPE`, `FOURPOINTS_API_URL` |
+| Call line  | `PUBLIC_BASE_URL`, `CLINICIAN_LANGUAGE_ID`, `HUMAN_INTERPRETER_NUMBERS`, `INPUT_SAMPLE_RATE_HZ`, `MAX_CALLS`, `PRESENTATION_MODE`, `PROMPT_VOICE`            |
+
+Every variable is described in `apps/telephony/.env.example`. The gateway
+checks them at start-up and refuses to start with a list of problems, so a
+bad value shows up as a failed deploy, not a broken call. In particular
+`TWILIO_ACCOUNT_CLIENT_SID` must be `SK` + 32 hex characters and set together
+with `_SECRET` (needed for `###` from a human call to the AI).
+
+Company numbers (`apps/telephony/src/companies.ts`) and recorded prompts
+(`ivr-audio/final`) ship inside the image, so adding a company or a prompt
+is a commit and a push, not a setting.
+
+### Check a deploy
+
+1. Helicarrier → `telephony` → **Deployments**: the newest one, with your
+   commit, is `active`.
+2. **Logs**: one `telephony.listening` line from the new start, showing the
+   FourPoints URL, `organizationLine: true`, `humanToAi: true`,
+   `companyNumbers` and `recordedPrompts`.
+3. From a terminal:
+
+   ```bash
+   curl -s https://telephony.on.helicarrier.xyz/healthz
+   ```
+
+   answers `{"status":"ok",…}`; a new prompt answers 200 at
+   `/prompts/<id>.wav`; an unsigned `POST /voice/incoming` answers 403.
+
+4. Make a test call (synthetic content only).
+
+### Roll back
+
+Helicarrier → `telephony` → **Deployments** → the previous deployment →
+**Roll back**. Or revert the commit and push. Rolling back the gateway never
+needs a FourPoints change.
+
+### Twilio numbers
+
+Each number's **A call comes in** webhook points at the gateway's public
+address (`PUBLIC_BASE_URL`): `/voice/incoming` for the current FourPoints
+number, `/voice/org/incoming` for the organization line and every company
+number. Trial Twilio accounts can't stream or dial out; the account must be
+upgraded. Call recording stays off.
+
+## Run it locally (local backend, public tunnel)
 
 Everything runs on one machine; only the gateway is exposed, through a
 cloudflared quick tunnel. Use synthetic conversations only — no real patient
@@ -70,7 +121,7 @@ calls until there is a Twilio BAA.
 4. **Call the number**, press 1, choose a language. `logs/gateway.jsonl` should
    show `call.started` then `fourpoints.session_opened` with your language.
 
-## Production deploy (once FourPoints has a telephony route)
+## Another container host (not used today)
 
 ### 1. Build the image
 

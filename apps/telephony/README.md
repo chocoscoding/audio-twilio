@@ -135,7 +135,9 @@ canceller does the rest. Consequence: nobody can interrupt a translation
    works on a trial.
 2. **Number** — Console → Phone Numbers → buy a number with **Voice**. Some
    countries need a regulatory bundle first.
-3. **Host the gateway** (next section) at e.g. `https://phone.example.com`.
+3. **Host the gateway** — today on Helicarrier at
+   `https://telephony.on.helicarrier.xyz` (`DEPLOY.md`); any host meeting the
+   requirements below works.
 4. **Point the number at it** — number → Voice Configuration → Configure with
    _Webhook_: **A call comes in** `https://phone.example.com/voice/incoming`
    (POST); optionally **Call status changes**
@@ -146,9 +148,9 @@ canceller does the rest. Consequence: nobody can interrupt a translation
 6. Leave **call recording off** (FourPoints stores no audio).
 7. **Compliance** — real patient calls need a Twilio BAA on eligible products
    and FourPoints' approval; until then use synthetic scenarios only.
-8. **Deployed FourPoints** — the live stack only admits browser logins; send
-   `docs/fourpoints-exposure.md` to the FourPoints team (infrastructure only),
-   then switch `FOURPOINTS_WS_URL` / `FOURPOINTS_AUTH` as described there.
+8. **Deployed FourPoints** — staging FourPoints accepts the gateway's machine
+   login on `/ws/telephony`. The live gateway runs on Helicarrier and deploys
+   on every push to `master`; see `DEPLOY.md`.
 
 ## Set up a company number
 
