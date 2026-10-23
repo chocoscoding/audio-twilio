@@ -70,6 +70,16 @@ export const COMPANIES: readonly Company[] = [
   //   humanNumber: '+18885550000',
   //   welcome: 'Thank you for calling Acme Health.', // optional
   // },
+  {
+    // VerbatUm (staging organization 017). Chicago number, dialed directly.
+    orgNumber: 17,
+    organizationId: '40c9f321-ffb2-4be7-aca6-36669c4fce70',
+    companyName: 'VerbatUm',
+    lines: [{ twilioNumber: '+18723047712' }],
+    // VerbatUm's own live interpreter line.
+    humanNumber: '+14342483776',
+    welcome: 'Thank you for calling VerbatUm.',
+  },
 ];
 
 export interface CompanySource {
