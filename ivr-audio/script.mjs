@@ -133,6 +133,12 @@ const FIXED = [
     'For an AI interpreter, press 1. For a human interpreter, press 2.',
     'For an AI interpreter, press 1. [upward inflection] For a human interpreter, press 2.',
   ),
+  line(
+    'mode-menu-human-first',
+    'opening',
+    'For a human interpreter, press 1. For an AI interpreter, press 2.',
+    'For a human interpreter, press 1. [upward inflection] For an AI interpreter, press 2.',
+  ),
   line('retry-invalid', 'opening', 'Sorry, that was not a valid choice.'),
   line('retry-no-input', 'opening', 'You have not made a choice yet.'),
   // Language menu
@@ -149,7 +155,7 @@ const FIXED = [
   line(
     'switch-hint',
     'ai',
-    'To switch to a human interpreter, press pound three times.',
+    'At any time, press the pound key three times to connect to a human interpreter.',
   ),
   line('switch-to-ai', 'ai', 'Switching you to the AI interpreter.'),
   line(

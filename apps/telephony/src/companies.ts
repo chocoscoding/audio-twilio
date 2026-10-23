@@ -56,6 +56,11 @@ export interface Company {
    * clip must say exactly this.
    */
   welcome?: string;
+  /**
+   * The AI/human menu says the human first: "For a human interpreter,
+   * press 1. For an AI interpreter, press 2." Default: AI is 1, human is 2.
+   */
+  humanFirst?: boolean;
 }
 
 export const COMPANIES: readonly Company[] = [
@@ -69,6 +74,7 @@ export const COMPANIES: readonly Company[] = [
   //   ],
   //   humanNumber: '+18885550000',
   //   welcome: 'Thank you for calling Acme Health.', // optional
+  //   humanFirst: true, // optional: 1 = human, 2 = AI
   // },
   {
     // VerbatUm (staging organization 017). Chicago number, dialed directly.
@@ -79,6 +85,8 @@ export const COMPANIES: readonly Company[] = [
     // VerbatUm's own live interpreter line.
     humanNumber: '+14342483776',
     welcome: 'Thank you for calling VerbatUm.',
+    // VerbatUm's menu: 1 for a live interpreter, 2 for the AI.
+    humanFirst: true,
   },
 ];
 

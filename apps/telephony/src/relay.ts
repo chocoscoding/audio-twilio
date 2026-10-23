@@ -281,6 +281,7 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
     connectedAt = Date.now();
     hub.stopWaiting(callSid);
     stopMusic?.();
+    keys.reset();
     log('relay.connected', {
       call: callId,
       answerSeconds: Math.round((connectedAt - ringStartedAt) / 1000),
@@ -460,18 +461,21 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
         if (digit.length !== 1) {
           break;
         }
+        // Keys pressed before the line answers are left over from the
+        // switch that brought the caller here; they never count.
+        if (phase !== 'connected') {
+          break;
+        }
         if (switchAllowed && keys.press(digit)) {
           switchToAi();
           break;
         }
         // Everything else reaches the interpreter line's own menu as a tone.
-        if (phase === 'connected') {
-          send(leg, {
-            event: 'media',
-            streamSid: legStreamSid,
-            media: { payload: Buffer.from(dtmfTone(digit)).toString('base64') },
-          });
-        }
+        send(leg, {
+          event: 'media',
+          streamSid: legStreamSid,
+          media: { payload: Buffer.from(dtmfTone(digit)).toString('base64') },
+        });
         break;
       }
       case 'stop':

@@ -294,10 +294,15 @@ export async function handleVoiceWebhook(
           ...(tries > 1
             ? retryLead(tries)
             : [first ?? (grant !== undefined ? THANK_YOU : WELCOME)]),
-          [
-            'mode-menu',
-            'For an AI interpreter, press 1. For a human interpreter, press 2.',
-          ],
+          company()?.humanFirst === true
+            ? [
+                'mode-menu-human-first',
+                'For a human interpreter, press 1. For an AI interpreter, press 2.',
+              ]
+            : [
+                'mode-menu',
+                'For an AI interpreter, press 1. For a human interpreter, press 2.',
+              ],
         ),
       ),
     );
@@ -898,13 +903,12 @@ export async function handleVoiceWebhook(
 
     case '/voice/mode':
       if (digits === '1' || digits === '2') {
+        // A company may list the human first (humanFirst): 1 human, 2 AI.
+        const wantsAi = digits === (company()?.humanFirst === true ? '2' : '1');
         if (menu.entries.length === 0) {
-          return human(
-            undefined,
-            digits === '1' ? speak(AI_NOT_AVAILABLE) : [],
-          );
+          return human(undefined, wantsAi ? speak(AI_NOT_AVAILABLE) : []);
         }
-        return digits === '1' ? languageMenu('ai', 1) : chooseHuman(1);
+        return wantsAi ? languageMenu('ai', 1) : chooseHuman(1);
       }
       if (attempt >= MAX_ATTEMPTS) {
         return orgLine() ? noChoice() : human(undefined);

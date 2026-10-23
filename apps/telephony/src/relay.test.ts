@@ -212,6 +212,27 @@ describe('human-call relay', () => {
     ]);
   });
 
+  it('ignores keys pressed before the line answers, and counts ### afresh after', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const { rest } = fakeRest();
+    const { caller, hub } = startCaller({ switch: '1' }, rest);
+    await settle();
+    // Left over from the ### that brought the caller here.
+    press(caller, '#');
+    press(caller, '#');
+    press(caller, '#');
+    expect(caller.readyState).toBe(1);
+    expect(rest.endCall).not.toHaveBeenCalled();
+    const leg = answer(hub);
+    press(caller, '#');
+    expect(caller.readyState).toBe(1);
+    expect(leg.payloads()).toHaveLength(1);
+    press(caller, '#');
+    press(caller, '#');
+    expect(caller.readyState).toBe(3);
+    expect(hub.take(CALLER)).toBe('switch_to_ai');
+  });
+
   it('other keys reach the interpreter line as tones; ### is passed on when switching is not allowed', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const { rest } = fakeRest();

@@ -278,6 +278,50 @@ describe('a company welcome', () => {
   });
 });
 
+describe('a company that lists the human first', () => {
+  const first = StaticCompanySource.from([{ ...ACME, humanFirst: true }]);
+
+  it('says 1 for a human, 2 for the AI, and routes the keys that way', async () => {
+    const menuTwiml = await hook(
+      '/voice/org/incoming',
+      {},
+      { To: TWILIO_NUMBER },
+      { access: fakeAccess(GRANTED).access, companies: first },
+    );
+    expect(menuTwiml).toContain(
+      'For a human interpreter, press 1. For an AI interpreter, press 2.',
+    );
+    const one = await hook(
+      '/voice/mode',
+      { ...ACME_GRANT, attempt: '1' },
+      { Digits: '1' },
+      { access: fakeAccess(GRANTED).access, companies: first },
+    );
+    expect(one).toContain(`<Number>${OPI}</Number>`);
+    const two = await hook(
+      '/voice/mode',
+      { ...ACME_GRANT, attempt: '1' },
+      { Digits: '2' },
+      { access: fakeAccess(GRANTED).access, companies: first },
+    );
+    expect(two).toContain('Please choose a language.');
+  });
+
+  it('leaves every other line as it was: 1 AI, 2 human', async () => {
+    const plain = await hook(
+      '/voice/mode',
+      { ...ACME_GRANT, attempt: '1' },
+      { Digits: '1' },
+      { access: fakeAccess(GRANTED).access },
+    );
+    expect(plain).toContain('Please choose a language.');
+    const shared = await hook('/voice/incoming', {}, {});
+    expect(shared).toContain(
+      'For an AI interpreter, press 1. For a human interpreter, press 2.',
+    );
+  });
+});
+
 describe('a company interpreter line (OPI)', () => {
   it('offers the AI, then the language menu, when the company line does not answer', async () => {
     const f = fakeAccess(GRANTED);

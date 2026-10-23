@@ -506,6 +506,17 @@
       "modelId": "eleven_v4",
       "approvedAt": "2026-10-13T04:32:02.381Z"
     },
+    "mode-menu-human-first": {
+      "file": "mode-menu-human-first.wav",
+      "kind": "speech",
+      "group": "opening",
+      "text": "For a human interpreter, press 1. For an AI interpreter, press 2.",
+      "durationMs": 4999,
+      "hash": "5d98561a3e3642c9",
+      "voiceId": "WqfqZq3UXPCD87IXHLnm",
+      "modelId": "eleven_v4",
+      "approvedAt": "2026-10-23T14:06:57.897Z"
+    },
     "no-choice": {
       "file": "no-choice.wav",
       "kind": "speech",
@@ -631,12 +642,12 @@
       "file": "switch-hint.wav",
       "kind": "speech",
       "group": "ai",
-      "text": "To switch to a human interpreter, press pound three times.",
-      "durationMs": 4043,
-      "hash": "1a748aee5fe2c6d4",
+      "text": "At any time, press the pound key three times to connect to a human interpreter.",
+      "durationMs": 4948,
+      "hash": "f7c5c5594685a26e",
       "voiceId": "WqfqZq3UXPCD87IXHLnm",
       "modelId": "eleven_v4",
-      "approvedAt": "2026-10-23T13:26:45.669Z"
+      "approvedAt": "2026-10-23T14:06:57.917Z"
     },
     "switch-to-ai": {
       "file": "switch-to-ai.wav",

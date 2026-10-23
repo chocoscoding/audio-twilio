@@ -52,7 +52,7 @@ const GREETING_MARK = 'greeting';
  */
 export const SWITCH_HINT = [
   'switch-hint',
-  'To switch to a human interpreter, press pound three times.',
+  'At any time, press the pound key three times to connect to a human interpreter.',
 ] as const;
 /** Said before the stream closes on a failure; /voice/ai-ended then dials a human. */
 const UNAVAILABLE_CLIP = 'ai-unavailable';

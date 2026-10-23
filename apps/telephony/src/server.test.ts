@@ -472,7 +472,7 @@ describe('recorded prompts (integration)', () => {
     },
     {
       id: 'switch-hint',
-      text: 'To switch to a human interpreter, press pound three times.',
+      text: 'At any time, press the pound key three times to connect to a human interpreter.',
       mulaw: new Uint8Array(800).fill(0x33),
     },
   ]);
