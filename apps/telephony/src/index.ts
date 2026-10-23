@@ -6,6 +6,7 @@
 
 import { createAccessClient } from './access.js';
 import { createAuthHeaders } from './auth.js';
+import { COMPANIES, StaticCompanySource } from './companies.js';
 import { loadConfig, type TelephonyConfig } from './config.js';
 import { fetchLanguages, type FourPointsTarget } from './fourpoints.js';
 import { LanguageRegistry, staticMenu } from './languages.js';
@@ -13,14 +14,17 @@ import { log } from './log.js';
 import { openPresentationLogs } from './presentation-log.js';
 import { PromptLibrary } from './prompts.js';
 import { createTelephonyServer } from './server.js';
+import { createTwilioRest } from './twilio-rest.js';
 
 const LANGUAGE_REFRESH_MS = 5 * 60_000;
 /** Fits inside a 30 s container stop timeout; raise both together. */
 const DRAIN_TIMEOUT_MS = 25_000;
 
 let config: TelephonyConfig;
+let companies: StaticCompanySource;
 try {
   config = loadConfig(process.env);
+  companies = StaticCompanySource.from(COMPANIES);
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
@@ -44,6 +48,17 @@ const access =
             : { ...config.fourPointsAuth, scope: config.fourPointsPhoneScope },
         ),
       );
+
+// ### from a human call to the AI releases the interpreter's leg through
+// the Twilio REST API; without an API key that switch is simply off.
+const rest =
+  config.twilioApiKey === undefined
+    ? undefined
+    : createTwilioRest({
+        accountSid: config.twilioAccountSid,
+        apiKeySid: config.twilioApiKey.sid,
+        apiKeySecret: config.twilioApiKey.secret,
+      });
 
 const registry = new LanguageRegistry({
   fetchLanguages: () => fetchLanguages(target),
@@ -81,6 +96,8 @@ const server = await createTelephonyServer({
   menu: () => (config.presentationMode ? presentationMenu : registry.menu),
   ...(access === undefined ? {} : { access }),
   prompts,
+  companies,
+  ...(rest === undefined ? {} : { rest }),
 });
 log('telephony.listening', {
   port: server.port,
@@ -88,6 +105,8 @@ log('telephony.listening', {
   fourPoints: config.fourPointsUrl,
   auth: config.fourPointsAuth.mode,
   organizationLine: access !== undefined,
+  companyNumbers: COMPANIES.length,
+  humanToAi: rest !== undefined,
   maxCalls: config.maxCalls,
   recordedPrompts: prompts.size,
 });

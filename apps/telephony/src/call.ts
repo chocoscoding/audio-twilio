@@ -27,6 +27,7 @@ import {
   type FourPointsTarget,
   type LanguagePair,
 } from './fourpoints.js';
+import { KeySequence } from './key-sequence.js';
 import { findByLanguage, type LanguageMenu } from './languages.js';
 import { log, redactId } from './log.js';
 import type { PromptClip, PromptLibrary } from './prompts.js';
@@ -45,6 +46,8 @@ const HOLD_MUSIC_LEAD_MS = 1_000;
 /** Never wait on a greeting's mark longer than its length plus this. */
 const GREETING_MARK_SLACK_MS = 3_000;
 const GREETING_MARK = 'greeting';
+/** Said before the stream closes on a failure; /voice/ai-ended then dials a human. */
+const UNAVAILABLE_CLIP = 'ai-unavailable';
 
 export interface CallOptions {
   config: TelephonyConfig;
@@ -71,6 +74,9 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
   let speechOpen = false; // an accepted tts utterance is streaming
   let pendingMarks = 0;
   let markCount = 0;
+  // ### hands the call to a human, when the IVR allowed it (`transfer`).
+  let transferAllowed = false;
+  const switchKeys = new KeySequence();
   const upsampler = new Upsampler2x();
   const downsampler = new Downsampler2x();
 
@@ -125,7 +131,7 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
     isPlaybackIdle: () => pendingMarks === 0 && !speechOpen,
     beforeListening: (resume) => {
       void ensureSession().then((ok) =>
-        ok ? resume() : endStream('fourpoints_unavailable'),
+        ok ? resume() : failStream('fourpoints_unavailable'),
       );
     },
     schedule: (callback, delayMs) => {
@@ -250,6 +256,24 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
     endCall(reason);
   };
 
+  /**
+   * The AI cannot go on: say so, then close (the caller reaches a human).
+   * /voice/ai-ended no longer says it, since a ### close reaches it too.
+   */
+  const failStream = (reason: string) => {
+    const clip = options.prompts?.clip(UNAVAILABLE_CLIP);
+    if (clip === undefined || ended) {
+      endStream(reason);
+      return;
+    }
+    floor.stop();
+    void playGreeting(clip).then(() => {
+      if (!ended) {
+        endStream(reason);
+      }
+    });
+  };
+
   const endCall = (reason: string) => {
     if (ended) {
       return;
@@ -297,6 +321,7 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
       clinicianLanguageId: config.clinicianLanguageId,
       patientLanguageId: patient.languageId,
     };
+    transferAllowed = params['transfer'] === '1';
     log('call.started', {
       call: callId,
       patientLanguageId: patient.languageId,
@@ -320,11 +345,11 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
     if (ok) {
       floor.start();
     } else {
-      endStream('fourpoints_unavailable');
+      failStream('fourpoints_unavailable');
     }
   };
 
-  /** Play the greeting; resolves once Twilio reports it played (or the call ends). */
+  /** Play a recorded prompt; resolves once Twilio reports it played (or the call ends). */
   const playGreeting = (greeting: PromptClip): Promise<void> =>
     new Promise((resolve) => {
       const timer = setTimeout(
@@ -425,6 +450,17 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
       case 'dtmf': {
         const dtmf = message['dtmf'];
         if (isJson(dtmf) && typeof dtmf['digit'] === 'string') {
+          if (switchKeys.press(dtmf['digit'])) {
+            if (transferAllowed) {
+              // A half-captured turn (key tones included) dies with the
+              // session; nothing is translated.
+              endStream('transfer_requested');
+            } else {
+              play(CUES.repeat);
+              mark();
+            }
+            break;
+          }
           floor.dtmf(dtmf['digit']);
         }
         break;

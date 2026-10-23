@@ -47,8 +47,35 @@ Twilio number ──HTTPS webhooks──► gateway: IVR  (press 1 AI / 2 human 
 4. **Human path, and every failure** — `<Dial>` rings the configured
    interpreters at once; each hears "FourPoints interpretation call for
    Spanish. Press 1 to accept" so voicemail cannot answer. If the AI stream
-   fails (FourPoints down, gateway full), Twilio continues at
-   `<Connect action>` and the caller is put through to a human.
+   fails (FourPoints down, gateway full), the caller hears "The AI
+   interpreter is unavailable." and Twilio continues at `<Connect action>`
+   to put them through to a human.
+5. **Company numbers** — a call arriving on a Twilio number listed in
+   `src/companies.ts` belongs to that company. The caller hears "Welcome to
+   <Company> interpretation." (the company's recording, or `<Say>` until it
+   is imported). There is no organization ID prompt: if the company has an
+   organization-wide access code (active or paused), the caller enters an
+   access code; if it has none, the call goes straight in. FourPoints still
+   checks status, phone access, AI/human and minutes on every call. Then the
+   usual menu (AI and human), or straight to the language menu (AI only), or
+   straight to a human (human only). A company with its own interpreter
+   line (OPI, `humanNumber`) has human calls go to that number with no
+   language menu and no "Press 1 to accept"; its minutes still count.
+6. **`###` switches between AI and human** (where the organization has
+   both; at most 3 switches per call):
+   - **AI → human:** `#` three times within 5 seconds closes the AI stream
+     (a half-spoken turn is dropped, not translated) and the caller hears
+     "Connecting you to a human interpreter… Please hold."
+   - **Human → AI:** during a human call a one-way copy of the caller's side
+     of the audio goes to the gateway (`/watch`), which only listens for `#`
+     tones in memory (never stored, never sent to FourPoints). On `###` the
+     interpreter hears "The caller has switched to the AI interpreter.
+     Goodbye." and is hung up; the caller hears "Switching you to the AI
+     interpreter." and the language menu.
+   - `###` rather than `000`, because callers type account numbers, PINs and
+     "0 for an operator" into OPI menus. One or two `#`, and `*`, work as
+     before. The human → AI direction is subject to a live test (see Known
+     limits).
 
 ## Echo — why there is no "Twilio AEC"
 
@@ -123,6 +150,61 @@ canceller does the rest. Consequence: nobody can interrupt a translation
    `docs/fourpoints-exposure.md` to the FourPoints team (infrastructure only),
    then switch `FOURPOINTS_WS_URL` / `FOURPOINTS_AUTH` as described there.
 
+## Set up a company number
+
+A company's own number gets its own welcome and, optionally, its own
+interpreter line (TELEPHONY-010 to 013).
+
+1. **Get the number into Twilio**, either:
+   - **Forwarded** (the number stays with the company's phone company): buy
+     a Twilio number for this company alone. The company is recognised by
+     that Twilio number, because the forwarding carrier does not reliably
+     pass on the original number.
+   - **Ported**: port the company's number into the FourPoints Twilio
+     account. The call arrives on the company's own number.
+2. **Webhook** — on the Twilio number, **A call comes in**
+   `https://phone.example.com/voice/org/incoming` (POST).
+3. **Add the company** to `apps/telephony/src/companies.ts`:
+
+   ```ts
+   {
+     orgNumber: 123,                      // as in the FourPoints admin console
+     organizationId: '3f1c…',             // must belong to orgNumber
+     companyName: 'Acme Health',          // spoken in the welcome
+     lines: [{ twilioNumber: '+15557654321' }],
+     humanNumber: '+18885550000',         // optional: their OPI line
+     welcome: 'Thank you for calling Acme Health.', // optional
+   }
+   ```
+
+   `twilioNumber` is the number the call arrives on in Twilio, and the only
+   one matched. When callers dial it directly (a number we gave the company,
+   or theirs ported in), that's all you list. Only for a **forwarded**
+   number, add `publicNumber`: the company's own number that forwards to
+   `twilioNumber`, kept as a record. All numbers in `+1…` (E.164) form. The
+   gateway refuses to start on a duplicate Twilio number or `orgNumber`, or
+   a badly formed number; a wrong `organizationId` is refused by FourPoints
+   on every call.
+
+4. **Forwarding** — if forwarded, the company turns on forwarding from its
+   number to the Twilio number.
+5. **Access code** — whether callers enter a code depends only on whether
+   the organization has an organization-wide code in FourPoints (active or
+   paused → code asked; none → straight in). Create or skip it to match
+   what the company chose.
+6. **Welcome recording** — record "Welcome to Acme Health."
+   (exactly the entry's `welcome`, or `Welcome to <companyName>.` without
+   one), then:
+
+   ```bash
+   node ivr-audio/pipeline.mjs import welcome-org-123 ~/Desktop/acme.m4a "Welcome to Acme Health."
+   open ivr-audio/review/index.html                # listen
+   node ivr-audio/pipeline.mjs approve welcome-org-123
+   ```
+
+   Rebuild and deploy the gateway image (prompts ship in it). Until then
+   the sentence is read aloud with `<Say>`.
+
 ## Hosting requirements
 
 - Public **HTTPS and WSS on 443 with a CA-signed certificate** for `/voice/*`
@@ -132,6 +214,8 @@ canceller does the rest. Consequence: nobody can interrupt a translation
   upstream; signatures are checked against this value).
 - Proxy/load-balancer connection lifetime ≥ 4 h (Twilio's call limit).
 - Outbound access to FourPoints and, for machine auth, the token endpoint.
+- Outbound access to `api.twilio.com` (human → AI `###`: the gateway
+  redirects the interpreter's leg through the Twilio REST API).
 - Container: `apps/telephony/Dockerfile` (non-root, `NODE_ENV=production`,
   `/healthz`). On SIGTERM it stops taking calls and drains for 25 s.
 
@@ -157,6 +241,11 @@ See `.env.example` — every variable is documented there. The gateway refuses
 to start in `NODE_ENV=production` without https, wss, machine auth and
 signature validation.
 
+New for `###` human → AI: `TWILIO_ACCOUNT_CLIENT_SID` and `TWILIO_ACCOUNT_CLIENT_SECRET`
+(Console → Account → API keys & tokens → create a Standard key). Store them
+where the Auth Token is stored. Without them, `###` during a human call does
+nothing; AI → human does not need them.
+
 ## Known limits and things to confirm on the first real calls
 
 - No barge-in (by design, see Echo).
@@ -166,7 +255,16 @@ signature validation.
   phone audio.
 - Twilio's documentation is inconsistent on whether a server-closed media
   stream continues at `<Connect action>`. Stop FourPoints during a test call
-  and confirm the caller reaches a human.
+  and confirm the caller reaches a human. The same continuation carries
+  `###` from AI to human.
+- **`###` from human to AI is unverified** until a live test on an upgraded
+  Twilio number confirms: the `#` tones are present in the copied caller
+  audio (some networks send keypresses separately and Twilio may strip
+  them); redirecting the interpreter's leg ends the `<Dial>` as `completed`
+  with no `DialCallDuration`; and a real OPI line works with no
+  "Press 1 to accept".
+- An OPI menu that itself asks for `###` within 5 seconds would switch the
+  caller to AI.
 
 ## Tests
 

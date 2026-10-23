@@ -61,12 +61,13 @@ Example with the current presentation list (`Spanish, Mandarin, Arabic, French, 
 
 ## 3. AI interpreter
 
-| ID                  | Text                                                                                                                            | When                                                |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `ai-connected-<id>` | You are connected to the FourPoints <Language> AI Interpreter. Please speak one person at a time. Press star when you are done. | one per language, right before the AI starts        |
-| `ai-not-available`  | The AI interpreter is not available right now.                                                                                  | **lead** — before transfer to a human               |
-| `ai-unavailable`    | The AI interpreter is unavailable.                                                                                              | **lead** — AI dropped mid-call, transfer to a human |
-| `ai-try-later`      | The AI interpreter is not available right now. Please try again later. Goodbye.                                                 | organization line, no languages, no human access    |
+| ID                  | Text                                                                                                                            | When                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `ai-connected-<id>` | You are connected to the FourPoints <Language> AI Interpreter. Please speak one person at a time. Press star when you are done. | one per language, right before the AI starts                                |
+| `ai-not-available`  | The AI interpreter is not available right now.                                                                                  | **lead** — before transfer to a human                                       |
+| `ai-unavailable`    | The AI interpreter is unavailable.                                                                                              | **lead** — AI dropped mid-call, transfer to a human                         |
+| `ai-try-later`      | The AI interpreter is not available right now. Please try again later. Goodbye.                                                 | organization line, no languages, no human access                            |
+| `switch-to-ai`      | Switching you to the AI interpreter.                                                                                            | **lead** — caller pressed `###` during a human call; then the language menu |
 
 ## 4. Human interpreter
 
@@ -82,25 +83,56 @@ Example with the current presentation list (`Spanish, Mandarin, Arabic, French, 
 
 ### Heard only by the interpreter (whisper)
 
-| ID             | Text                                                              |
-| -------------- | ----------------------------------------------------------------- |
-| `whisper`      | FourPoints interpretation call. Press 1 to accept.                |
-| `whisper-<id>` | FourPoints interpretation call for <Language>. Press 1 to accept. |
+| ID                     | Text                                                              |
+| ---------------------- | ----------------------------------------------------------------- |
+| `whisper`              | FourPoints interpretation call. Press 1 to accept.                |
+| `whisper-<id>`         | FourPoints interpretation call for <Language>. Press 1 to accept. |
+| `interpreter-released` | The caller has switched to the AI interpreter. Goodbye.           |
+
+`interpreter-released` is played to the human or OPI interpreter's side when
+the caller presses `###` to go to the AI; then that side is hung up.
 
 ## 5. Organization line (organization ID + access code)
 
-| ID                    | Text                                                                                                                     | When                                                        |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
-| `org-id-prompt`       | Please enter your organization ID, then press pound.                                                                     | after `welcome`, or after a retry lead                      |
-| `org-id-invalid`      | Sorry, that is not a valid organization ID.                                                                              | **lead** → `org-id-prompt`                                  |
-| `org-id-unreadable`   | Sorry, we could not read your organization ID. Goodbye.                                                                  | third bad organization ID                                   |
-| `code-prompt`         | Please enter your six digit access code, then press pound.                                                               | after a valid organization ID                               |
-| `code-not-recognized` | Sorry, that organization ID or access code was not recognized.                                                           | **lead** → `org-id-prompt`, or + `goodbye` on the third try |
-| `code-check-failed`   | Sorry, we cannot check your access code right now. Please call again in a few minutes. Goodbye.                          | FourPoints did not answer                                   |
-| `line-unavailable`    | This line is not available right now. Goodbye.                                                                           | gateway has no FourPoints access                            |
-| `org-not-available`   | Phone interpretation is not available for your organization right now. Please contact your administrator. Goodbye.       | organization paused / no phone access                       |
-| `quota-exhausted`     | Your organization has used all of its interpretation minutes for this month. Please contact your administrator. Goodbye. | out of minutes                                              |
-| `no-choice`           | We did not receive a choice. Please call again when you are ready. Goodbye.                                              | third menu with no key pressed                              |
+| ID                    | Text                                                                                                                     | When                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `org-id-prompt`       | Please enter your organization ID, then press pound.                                                                     | after `welcome`, or after a retry lead                                                                            |
+| `org-id-invalid`      | Sorry, that is not a valid organization ID.                                                                              | **lead** → `org-id-prompt`                                                                                        |
+| `org-id-unreadable`   | Sorry, we could not read your organization ID. Goodbye.                                                                  | third bad organization ID                                                                                         |
+| `code-prompt`         | Please enter your six digit access code, then press pound.                                                               | after a valid organization ID                                                                                     |
+| `code-not-recognized` | Sorry, that organization ID or access code was not recognized.                                                           | **lead** → `org-id-prompt`, or + `goodbye` on the third try                                                       |
+| `code-invalid`        | Sorry, that access code was not recognized.                                                                              | **lead** → `code-prompt` on a company number (no organization ID is typed there), or + `goodbye` on the third try |
+| `code-check-failed`   | Sorry, we cannot check your access code right now. Please call again in a few minutes. Goodbye.                          | FourPoints did not answer                                                                                         |
+| `line-unavailable`    | This line is not available right now. Goodbye.                                                                           | gateway has no FourPoints access                                                                                  |
+| `org-not-available`   | Phone interpretation is not available for your organization right now. Please contact your administrator. Goodbye.       | organization paused / no phone access                                                                             |
+| `quota-exhausted`     | Your organization has used all of its interpretation minutes for this month. Please contact your administrator. Goodbye. | out of minutes                                                                                                    |
+| `no-choice`           | We did not receive a choice. Please call again when you are ready. Goodbye.                                              | third menu with no key pressed                                                                                    |
+
+## 5a. Company welcome (company numbers)
+
+A call on a company's own number starts with that company's welcome instead
+of `welcome`. Then, only if the company has an organization-wide access code,
+`code-prompt`; then the menu as usual (no organization ID prompt).
+
+| ID                        | Text                                                                                         |
+| ------------------------- | -------------------------------------------------------------------------------------------- |
+| `welcome-org-<orgNumber>` | the entry's `welcome` (e.g. "Thank you for calling VerbatUm."), or Welcome to <companyName>. |
+
+- `<orgNumber>` and `<companyName>` are the company's entry in
+  `apps/telephony/src/companies.ts`, e.g. `welcome-org-123`, "Welcome to Acme
+  Health."
+- **The owner records it** (one per company), or it is generated in the
+  prompt voice from `COMPANY_WELCOMES` in `ivr-audio/script.mjs`. Import it
+  so it gets the same processing as the other clips, listen in
+  `ivr-audio/review/index.html`, then approve:
+
+  ```bash
+  node ivr-audio/pipeline.mjs import welcome-org-123 ~/Desktop/acme.m4a "Welcome to Acme Health."
+  node ivr-audio/pipeline.mjs approve welcome-org-123
+  ```
+
+- The text must match exactly (same `companyName`, same punctuation). Until
+  a matching clip is approved, the gateway reads the sentence aloud (`<Say>`).
 
 ## 6. Presentation mode only (demo line, skip for production)
 

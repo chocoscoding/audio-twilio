@@ -6,6 +6,8 @@
  *   POST /voice/*   Twilio webhooks → TwiML (signature-checked); the
  *                   organization line (/voice/org/*) also calls FourPoints
  *   WS   /media     Twilio bidirectional Media Streams (signature-checked)
+ *   WS   /watch     caller-side copy of a human call, only listened to for
+ *                   ### (watch.ts; signature-checked; nothing is kept)
  *
  * The only per-instance state is a count of active calls, used to refuse new
  * AI streams at MAX_CALLS. A refused stream is not an outage: Twilio continues
@@ -23,9 +25,10 @@ import { WebSocketServer } from 'ws';
 
 import type { AccessClient } from './access.js';
 import { runCall } from './call.js';
+import type { CompanySource } from './companies.js';
 import type { TelephonyConfig } from './config.js';
 import type { FourPointsTarget } from './fourpoints.js';
-import { handleVoiceWebhook } from './ivr.js';
+import { handleVoiceWebhook, INTERPRETER_RELEASED, speakLines } from './ivr.js';
 import type { LanguageMenu } from './languages.js';
 import { log } from './log.js';
 import type { PromptLibrary } from './prompts.js';
@@ -37,10 +40,15 @@ import {
   twilioLog,
 } from './presentation-log.js';
 import { runPresentationStream } from './presentation-stream.js';
+import type { TwilioRest } from './twilio-rest.js';
 import { isValidTwilioSignature } from './twilio-signature.js';
+import { response } from './twiml.js';
+import { runWatch } from './watch.js';
 
 const MAX_WEBHOOK_BODY_BYTES = 16 * 1024;
 const MAX_TWILIO_MESSAGE_BYTES = 64 * 1024;
+/** Watch streams are tiny (tone detection only); human calls per instance. */
+const WATCH_STREAMS_PER_CALL_SLOT = 4;
 
 export interface TelephonyServerOptions {
   config: TelephonyConfig;
@@ -50,6 +58,10 @@ export interface TelephonyServerOptions {
   access?: AccessClient;
   /** Recorded prompts; without them every line is a <Say>. */
   prompts?: PromptLibrary;
+  /** Companies with a number of their own. */
+  companies?: CompanySource;
+  /** Twilio REST; without it ### during a human call does nothing. */
+  rest?: TwilioRest;
 }
 
 export interface TelephonyServer {
@@ -99,6 +111,7 @@ export async function createTelephonyServer(
 ): Promise<TelephonyServer> {
   const { config } = options;
   let activeCalls = 0;
+  let activeWatches = 0;
   let draining = false;
   const aiAvailable = () => !draining && activeCalls < config.maxCalls;
 
@@ -175,6 +188,10 @@ export async function createTelephonyServer(
         aiAvailable: aiAvailable(),
         ...(options.access === undefined ? {} : { access: options.access }),
         ...(options.prompts === undefined ? {} : { prompts: options.prompts }),
+        ...(options.companies === undefined
+          ? {}
+          : { companies: options.companies }),
+        humanToAi: options.rest !== undefined,
         log,
       },
     );
@@ -216,7 +233,7 @@ export async function createTelephonyServer(
       );
     };
     const url = new URL(req.url ?? '/', 'http://gateway.invalid');
-    if (url.pathname !== '/media') {
+    if (url.pathname !== '/media' && url.pathname !== '/watch') {
       refuse(404, 'unknown_path');
       return;
     }
@@ -233,6 +250,32 @@ export async function createTelephonyServer(
         refuse(403, 'bad_signature');
         return;
       }
+    }
+    if (url.pathname === '/watch') {
+      const rest = options.rest;
+      if (
+        rest === undefined ||
+        draining ||
+        activeWatches >= config.maxCalls * WATCH_STREAMS_PER_CALL_SLOT
+      ) {
+        // The human call goes on; only ### to the AI is lost.
+        refuse(503, rest === undefined ? 'no_rest' : 'watch_at_capacity');
+        return;
+      }
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        activeWatches += 1;
+        runWatch(ws, {
+          accountSid: config.twilioAccountSid,
+          rest,
+          releaseTwiml: response(
+            ...speakLines(config, options.prompts, INTERPRETER_RELEASED),
+          ),
+          onEnd: () => {
+            activeWatches -= 1;
+          },
+        });
+      });
+      return;
     }
     if (!aiAvailable()) {
       refuse(503, draining ? 'draining' : 'at_capacity');

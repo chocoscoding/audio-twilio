@@ -58,6 +58,9 @@ function fakeAccess(
       if (result instanceof Error) throw result;
       return result;
     },
+    async line() {
+      throw new Error('not a company number');
+    },
     async usage(event) {
       events.push(event);
       return usage;

@@ -145,6 +145,8 @@ const FIXED = [
     'The AI interpreter is not available right now.',
   ),
   line('ai-unavailable', 'ai', 'The AI interpreter is unavailable.'),
+  // `###` during a human call: the caller hears this, then the language menu.
+  line('switch-to-ai', 'ai', 'Switching you to the AI interpreter.'),
   line(
     'ai-try-later',
     'ai',
@@ -178,6 +180,12 @@ const FIXED = [
     'whisper',
     'FourPoints interpretation call. Press 1 to accept.',
   ),
+  // The OPI / human interpreter hears this when the caller switches to AI.
+  line(
+    'interpreter-released',
+    'whisper',
+    'The caller has switched to the AI interpreter. Goodbye.',
+  ),
   // Organization line
   line(
     'org-id-prompt',
@@ -200,6 +208,8 @@ const FIXED = [
     'org',
     'Sorry, that organization ID or access code was not recognized.',
   ),
+  // Company number: a wrong code (no organization ID was typed there).
+  line('code-invalid', 'org', 'Sorry, that access code was not recognized.'),
   line(
     'code-check-failed',
     'org',
@@ -224,6 +234,26 @@ const FIXED = [
     'no-choice',
     'org',
     'We did not receive a choice. Please call again when you are ready. Goodbye.',
+  ),
+];
+
+/**
+ * Company welcomes in the prompt voice, for companies with a number of their
+ * own (apps/telephony/src/companies.ts). The id is welcome-org-<orgNumber>
+ * and the text must be exactly what the gateway says: the company's
+ * `welcome` in companies.ts, or else `Welcome to <companyName>.`. A company
+ * that records its own welcome uses `pipeline.mjs import`
+ * instead and is not listed here.
+ */
+const COMPANY_WELCOMES = [
+  // VerbatUm, organization 017 (staging): its own greeting text, the
+  // `welcome` in companies.ts. `speak` drops the capital U so it is read
+  // as one word.
+  line(
+    'welcome-org-17',
+    'company',
+    'Thank you for calling VerbatUm.',
+    'Thank you for calling Verbatum.',
   ),
 ];
 
@@ -263,10 +293,12 @@ const PER_LANGUAGE = LANGUAGES.flatMap(({ id, name, code, connected }, i) => {
   ];
 });
 
-export const PROMPTS = [...FIXED, ...PER_LANGUAGE].map((p) => ({
-  ...p,
-  parts: p.parts ?? [{ speak: p.speak }],
-}));
+export const PROMPTS = [...FIXED, ...COMPANY_WELCOMES, ...PER_LANGUAGE].map(
+  (p) => ({
+    ...p,
+    parts: p.parts ?? [{ speak: p.speak }],
+  }),
+);
 
 /** Silence between the parts of a multi-part clip. */
 export const PART_GAP_MS = 450;

@@ -13,9 +13,19 @@
  *                        may use, minutes left) in its signed action URLs,
  *                        and each AI or human leg is reported for usage.
  *                        The organization is never put in the media stream.
+ *                        A call arriving on a company's own number
+ *                        (companies.ts) hears the company's welcome and
+ *                        skips the organization ID; FourPoints says whether
+ *                        it must still enter a code.
+ *
+ * During a call, ### switches between AI and human (at most MAX_SWITCHES
+ * times): from AI, the gateway closes the stream and /voice/ai-ended dials a
+ * human; from a human, the /watch stream hears the tones and releases the
+ * interpreter, and /voice/human-result reads out the language menu.
  */
 
-import type { AccessClient } from './access.js';
+import type { AccessClient, LineResult } from './access.js';
+import type { Company, CompanySource } from './companies.js';
 import type { TelephonyConfig } from './config.js';
 import {
   findByDigits,
@@ -35,6 +45,13 @@ export interface IvrContext {
   access?: AccessClient;
   /** Recorded prompts; any line without a matching clip is a <Say>. */
   prompts?: PromptLibrary;
+  /** Companies with a number of their own. */
+  companies?: CompanySource;
+  /**
+   * True when the gateway can release a human interpreter (Twilio REST
+   * configured), so ### during a human call can switch to the AI.
+   */
+  humanToAi?: boolean;
   /** Content-free operational log. */
   log?: (
     event: string,
@@ -44,7 +61,7 @@ export interface IvrContext {
 
 type Mode = 'ai' | 'human';
 /** One spoken line: recorded clip id (ivr-audio/script.mjs) and its text. */
-type Line = readonly [id: string, text: string];
+export type Line = readonly [id: string, text: string];
 
 const WELCOME: Line = ['welcome', 'Welcome to FourPoints interpretation.'];
 const THANK_YOU: Line = ['thank-you', 'Thank you.'];
@@ -56,6 +73,30 @@ const AI_NOT_AVAILABLE: Line = [
 const CODE_NOT_RECOGNIZED: Line = [
   'code-not-recognized',
   'Sorry, that organization ID or access code was not recognized.',
+];
+/** A company's own number: no organization ID was typed. */
+const CODE_INVALID: Line = [
+  'code-invalid',
+  'Sorry, that access code was not recognized.',
+];
+const HUMAN_CONNECTING: Line = [
+  'human-connecting',
+  'Connecting you to a human interpreter. Please hold.',
+];
+const SWITCH_TO_AI: Line = [
+  'switch-to-ai',
+  'Switching you to the AI interpreter.',
+];
+/** Heard by the interpreter when the caller switches to the AI. */
+export const INTERPRETER_RELEASED: Line = [
+  'interpreter-released',
+  'The caller has switched to the AI interpreter. Goodbye.',
+];
+
+/** The company's own welcome, recorded by the owner (ivr-audio import). */
+export const companyWelcome = (company: Company): Line => [
+  `welcome-org-${company.orgNumber}`,
+  company.welcome ?? `Welcome to ${company.companyName}.`,
 ];
 
 /** Clip-id suffix for a language: es-US → es-us. */
@@ -69,6 +110,10 @@ export const aiGreeting = (entry: MenuEntry): Line => [
 ];
 
 const MAX_ATTEMPTS = 3;
+/** ### switches between AI and human at most this many times per call. */
+export const MAX_SWITCHES = 3;
+/** Name of the caller-side <Start><Stream> that listens for ### (watch.ts). */
+const WATCH_STREAM = 'watch';
 /**
  * Seconds Twilio waits for a key — before the first and between digits —
  * after the prompt ends. Callers said 6 s felt rushed (owner, 2026-10-13).
@@ -89,6 +134,8 @@ interface CallGrant {
   minutes: number;
   /** Interpretation legs started so far on this call. */
   leg: number;
+  /** orgNumber of a listed company (companies.ts), for its own interpreters. */
+  company: number | undefined;
 }
 
 function readGrant(query: URLSearchParams): CallGrant | undefined {
@@ -97,6 +144,7 @@ function readGrant(query: URLSearchParams): CallGrant | undefined {
     return undefined;
   }
   const emp = query.get('emp');
+  const company = Number(query.get('co'));
   return {
     org,
     emp: emp !== null && GUID.test(emp) ? emp : undefined,
@@ -104,7 +152,46 @@ function readGrant(query: URLSearchParams): CallGrant | undefined {
     human: query.get('hu') === '1',
     minutes: Math.max(Number(query.get('min')) || 0, 0),
     leg: Math.min(Math.max(Number(query.get('leg')) || 0, 0), 20),
+    company: Number.isInteger(company) && company >= 10 ? company : undefined,
   };
+}
+
+/**
+ * Lines → TwiML: a <Play> per line with a matching recorded clip; the rest
+ * as <Say>, adjacent ones merged so they read as one sentence as before.
+ */
+export function speakLines(
+  config: TelephonyConfig,
+  prompts: PromptLibrary | undefined,
+  ...lines: Line[]
+): string[] {
+  const out: string[] = [];
+  let pending: string[] = [];
+  const flush = () => {
+    if (pending.length > 0) {
+      out.push(say(pending.join(' ')));
+      pending = [];
+    }
+  };
+  for (const [id, text] of lines) {
+    const clip = prompts?.match(id, text);
+    if (clip === undefined) {
+      pending.push(text);
+      continue;
+    }
+    flush();
+    out.push(
+      element(
+        'Play',
+        {},
+        escapeXml(
+          `${config.publicBaseUrl}/prompts/${clip.id}.wav?v=${clip.version}`,
+        ),
+      ),
+    );
+  }
+  flush();
+  return out;
 }
 
 /** TwiML for one webhook, or null when the route does not exist. */
@@ -126,6 +213,18 @@ export async function handleVoiceWebhook(
   );
   const mode: Mode = query.get('mode') === 'ai' ? 'ai' : 'human';
   const language = findByLanguage(menu, query.get('lang'));
+  let switches = Math.min(
+    Math.max(Number(query.get('sw')) || 0, 0),
+    MAX_SWITCHES,
+  );
+  const canSwitch = () => !config.presentationMode && switches < MAX_SWITCHES;
+  /** The listed company this call belongs to, if any. */
+  const company = (): Company | undefined =>
+    grant?.company === undefined
+      ? undefined
+      : ctx.companies?.byOrgNumber(grant.company);
+  /** The company's own interpreter line (OPI), if it has one. */
+  const companyHuman = () => company()?.humanNumber;
 
   const url = (
     route: string,
@@ -142,8 +241,13 @@ export async function handleVoiceWebhook(
             hu: grant.human ? 1 : 0,
             min: grant.minutes,
             leg: grant.leg,
+            co: grant.company,
           };
-    for (const [key, value] of Object.entries({ ...carried, ...params })) {
+    for (const [key, value] of Object.entries({
+      ...carried,
+      sw: switches === 0 ? undefined : switches,
+      ...params,
+    })) {
       if (value !== undefined) {
         search.set(key, String(value));
       }
@@ -152,39 +256,8 @@ export async function handleVoiceWebhook(
     return `${config.publicBaseUrl}${route}${qs === '' ? '' : `?${qs}`}`;
   };
 
-  /**
-   * Lines → TwiML: a <Play> per line with a matching recorded clip; the rest
-   * as <Say>, adjacent ones merged so they read as one sentence as before.
-   */
-  const speak = (...lines: Line[]): string[] => {
-    const out: string[] = [];
-    let pending: string[] = [];
-    const flush = () => {
-      if (pending.length > 0) {
-        out.push(say(pending.join(' ')));
-        pending = [];
-      }
-    };
-    for (const [id, text] of lines) {
-      const clip = ctx.prompts?.match(id, text);
-      if (clip === undefined) {
-        pending.push(text);
-        continue;
-      }
-      flush();
-      out.push(
-        element(
-          'Play',
-          {},
-          escapeXml(
-            `${config.publicBaseUrl}/prompts/${clip.id}.wav?v=${clip.version}`,
-          ),
-        ),
-      );
-    }
-    flush();
-    return out;
-  };
+  const speak = (...lines: Line[]): string[] =>
+    speakLines(config, ctx.prompts, ...lines);
 
   // The organization line never picks for the caller: no input is said as
   // such and asked again, and after the last try the call ends (owner
@@ -204,7 +277,7 @@ export async function handleVoiceWebhook(
       'We did not receive a choice. Please call again when you are ready.',
     );
 
-  const modeMenu = (tries: number) =>
+  const modeMenu = (tries: number, first?: Line) =>
     response(
       element(
         'Gather',
@@ -219,7 +292,7 @@ export async function handleVoiceWebhook(
         ...speak(
           ...(tries > 1
             ? retryLead(tries)
-            : [grant !== undefined ? THANK_YOU : WELCOME]),
+            : [first ?? (grant !== undefined ? THANK_YOU : WELCOME)]),
           [
             'mode-menu',
             'For an AI interpreter, press 1. For a human interpreter, press 2.',
@@ -228,7 +301,13 @@ export async function handleVoiceWebhook(
       ),
     );
 
-  const languageMenu = (menuMode: Mode, tries: number) => {
+  /** `before`: verbs ahead of the menu (stopping the ### watch stream). */
+  const languageMenu = (
+    menuMode: Mode,
+    tries: number,
+    lead: Line[] = [],
+    before: string[] = [],
+  ) => {
     // Up to 10 languages are one key each (the tenth is 0).
     const twoDigits = menu.entries.some((entry) => entry.digits.length > 1);
     const options = menu.entries.map((entry): Line => [
@@ -236,6 +315,7 @@ export async function handleVoiceWebhook(
       `For ${entry.displayName}, press ${entry.digits}.`,
     ]);
     return response(
+      ...before,
       element(
         'Gather',
         {
@@ -251,6 +331,7 @@ export async function handleVoiceWebhook(
           }),
         },
         ...speak(
+          ...lead,
           ...retryLead(tries),
           ['language-menu-intro', 'Please choose a language.'],
           ...options,
@@ -263,19 +344,40 @@ export async function handleVoiceWebhook(
   };
 
   const dialHuman = (entry: MenuEntry | undefined): string[] => {
+    // A company's own interpreter line answers with its own menu or queue:
+    // no language, and no press-1 screening nobody there would answer.
+    const opi = companyHuman();
     const numbers =
-      (entry === undefined
-        ? undefined
-        : config.humanNumbers[entry.languageId]) ??
-      config.humanNumbers['default'] ??
-      [];
+      opi !== undefined
+        ? [opi]
+        : ((entry === undefined
+            ? undefined
+            : config.humanNumbers[entry.languageId]) ??
+          config.humanNumbers['default'] ??
+          []);
+    // ### to the AI: a caller-side copy of the call listens for the tones.
+    const watch =
+      ctx.humanToAi === true &&
+      canSwitch() &&
+      canAi() &&
+      menu.entries.length > 0;
     return [
+      ...(watch
+        ? [
+            element(
+              'Start',
+              {},
+              element('Stream', {
+                name: WATCH_STREAM,
+                url: `${config.publicBaseUrl.replace(/^http/, 'ws')}/watch`,
+                track: 'inbound_track',
+              }),
+            ),
+          ]
+        : []),
       ...speak(
-        entry === undefined
-          ? [
-              'human-connecting',
-              'Connecting you to a human interpreter. Please hold.',
-            ]
+        entry === undefined || opi !== undefined
+          ? HUMAN_CONNECTING
           : [
               `human-connecting-${clipKey(entry.languageId)}`,
               `Connecting you to a human interpreter for ${entry.displayName}. Please hold.`,
@@ -289,12 +391,17 @@ export async function handleVoiceWebhook(
           // Organization line: never past the minutes left this month.
           timeLimit:
             grant === undefined ? undefined : Math.max(grant.minutes, 1) * 60,
-          action: url('/voice/human-result', { lang: entry?.languageId }),
+          action: url('/voice/human-result', {
+            lang: entry?.languageId,
+            wt: watch ? 1 : undefined,
+          }),
         },
         ...numbers.map((number) =>
           element(
             'Number',
-            { url: url('/voice/whisper', { lang: entry?.languageId }) },
+            opi !== undefined
+              ? {}
+              : { url: url('/voice/whisper', { lang: entry?.languageId }) },
             escapeXml(number),
           ),
         ),
@@ -337,6 +444,10 @@ export async function handleVoiceWebhook(
             name: 'patientLanguageId',
             value: entry.languageId,
           }),
+          // ### may go to a human. A yes/no only: never the organization.
+          ...(intro === undefined && canSwitch() && canHuman()
+            ? [element('Parameter', { name: 'transfer', value: '1' })]
+            : []),
           ...(greeting === undefined
             ? []
             : [element('Parameter', { name: 'greeting', value: greeting.id })]),
@@ -457,7 +568,13 @@ export async function handleVoiceWebhook(
         ]),
       ),
     );
-  const codePrompt = (orgNumber: number, tries: number) =>
+  /** `dedicated`: a company's own number, where no organization ID was typed. */
+  const codePrompt = (
+    orgNumber: number,
+    tries: number,
+    lead: Line[] = [],
+    dedicated = false,
+  ) =>
     response(
       element(
         'Gather',
@@ -466,18 +583,66 @@ export async function handleVoiceWebhook(
           finishOnKey: '#',
           timeout: ENTRY_TIMEOUT_S,
           actionOnEmptyResult: true,
-          action: url('/voice/org/code', { n: orgNumber, attempt: tries }),
+          action: url('/voice/org/code', {
+            n: orgNumber,
+            attempt: tries,
+            dl: dedicated ? 1 : undefined,
+          }),
         },
-        ...speak([
+        ...speak(...lead, [
           'code-prompt',
           'Please enter your six digit access code, then press pound.',
         ]),
       ),
     );
-  const notRecognized = () =>
-    attempt >= MAX_ATTEMPTS
-      ? response(...speak(CODE_NOT_RECOGNIZED, GOODBYE), element('Hangup'))
-      : orgNumberPrompt(attempt + 1, CODE_NOT_RECOGNIZED);
+  const notRecognized = () => {
+    const dedicated = query.get('dl') === '1';
+    const lead = dedicated ? CODE_INVALID : CODE_NOT_RECOGNIZED;
+    if (attempt >= MAX_ATTEMPTS) {
+      return response(...speak(lead, GOODBYE), element('Hangup'));
+    }
+    return dedicated
+      ? codePrompt(Number(query.get('n')), attempt + 1, [lead], true)
+      : orgNumberPrompt(attempt + 1, lead);
+  };
+  const lineUnavailable = () =>
+    goodbye('line-unavailable', 'This line is not available right now.');
+  const quotaExhausted = () =>
+    goodbye(
+      'quota-exhausted',
+      'Your organization has used all of its interpretation minutes for this month. Please contact your administrator.',
+    );
+
+  /** Human chosen: a company's own line rings at once, with no language menu. */
+  const chooseHuman = (tries: number, lead: Line[] = []) =>
+    companyHuman() !== undefined
+      ? human(undefined, speak(...lead))
+      : languageMenu('human', tries, lead);
+
+  /**
+   * Access granted (a valid code, or a company number that needs none):
+   * the menus the grant allows. `welcome` is the company's welcome when
+   * nothing has been said yet; otherwise the AI/human menu opens with
+   * "Thank you." as before.
+   */
+  const afterAccess = async (welcome?: Line): Promise<string> => {
+    if (grant === undefined || (!grant.ai && !grant.human)) {
+      return notAvailable();
+    }
+    const lead = welcome === undefined ? [] : [welcome];
+    if (menu.entries.length === 0) {
+      return grant.human
+        ? human(undefined, speak(...lead))
+        : goodbye(
+            'ai-try-later',
+            'The AI interpreter is not available right now. Please try again later.',
+          );
+    }
+    if (grant.ai && grant.human) {
+      return modeMenu(1, welcome);
+    }
+    return grant.ai ? languageMenu('ai', 1, lead) : chooseHuman(1, lead);
+  };
 
   /** The organization line's code check. Fails closed. */
   const checkCode = async (): Promise<string> => {
@@ -491,10 +656,7 @@ export async function handleVoiceWebhook(
       return notRecognized();
     }
     if (ctx.access === undefined) {
-      return goodbye(
-        'line-unavailable',
-        'This line is not available right now.',
-      );
+      return lineUnavailable();
     }
     let result;
     try {
@@ -514,12 +676,19 @@ export async function handleVoiceWebhook(
       case 'NO_PHONE_ACCESS':
         return notAvailable();
       case 'QUOTA_EXHAUSTED':
-        return goodbye(
-          'quota-exhausted',
-          'Your organization has used all of its interpretation minutes for this month. Please contact your administrator.',
-        );
+        return quotaExhausted();
       case 'OK':
         break;
+    }
+    // A listed company keeps its own interpreters on the shared line too,
+    // but only when the code resolved to the organization the list names.
+    const listed = ctx.companies?.byOrgNumber(orgNumber);
+    if (
+      query.get('dl') === '1' &&
+      listed?.organizationId !== result.organizationId
+    ) {
+      log('access.line_mismatch');
+      return lineUnavailable();
     }
     grant = {
       org: result.organizationId,
@@ -528,22 +697,59 @@ export async function handleVoiceWebhook(
       human: result.humanAllowed,
       minutes: result.minutesRemaining,
       leg: 0,
+      company:
+        listed?.organizationId === result.organizationId
+          ? orgNumber
+          : undefined,
     };
-    if (!grant.ai && !grant.human) {
-      return notAvailable();
+    return afterAccess();
+  };
+
+  /**
+   * A call on a company's own number. FourPoints decides whether the caller
+   * must still enter a code (the organization has an organization-wide
+   * code, active or paused) or goes straight in. Fails closed.
+   */
+  const companyLine = async (listed: Company): Promise<string> => {
+    if (ctx.access === undefined) {
+      return lineUnavailable();
     }
-    if (menu.entries.length === 0) {
-      return grant.human
-        ? human(undefined)
-        : goodbye(
-            'ai-try-later',
-            'The AI interpreter is not available right now. Please try again later.',
-          );
+    let result: LineResult;
+    try {
+      result = await ctx.access.line(listed.orgNumber, listed.organizationId);
+    } catch {
+      log('access.line_failed');
+      return lineUnavailable();
     }
-    if (grant.ai && grant.human) {
-      return modeMenu(1);
+    log('access.line', { outcome: result.outcome });
+    switch (result.outcome) {
+      case 'CODE_REQUIRED':
+        return codePrompt(listed.orgNumber, 1, [companyWelcome(listed)], true);
+      case 'INVALID':
+        // The list's organizationId does not belong to its orgNumber.
+        return lineUnavailable();
+      case 'NOT_ACTIVE':
+      case 'NO_PHONE_ACCESS':
+        return notAvailable();
+      case 'QUOTA_EXHAUSTED':
+        return quotaExhausted();
+      case 'OK':
+        break;
     }
-    return languageMenu(grant.ai ? 'ai' : 'human', 1);
+    if (result.organizationId !== listed.organizationId) {
+      log('access.line_mismatch');
+      return lineUnavailable();
+    }
+    grant = {
+      org: result.organizationId,
+      emp: undefined,
+      ai: result.aiAllowed,
+      human: result.humanAllowed,
+      minutes: result.minutesRemaining,
+      leg: 0,
+      company: listed.orgNumber,
+    };
+    return afterAccess(companyWelcome(listed));
   };
 
   // Presentation mode: same menus, but each route announces its destination.
@@ -612,9 +818,13 @@ export async function handleVoiceWebhook(
     case '/voice/incoming':
       return modeMenu(1);
 
-    case '/voice/org/incoming':
+    case '/voice/org/incoming': {
       grant = undefined;
-      return orgNumberPrompt(1, WELCOME);
+      const listed = ctx.companies?.byTwilioNumber(body.get('To'));
+      return listed === undefined
+        ? orgNumberPrompt(1, WELCOME)
+        : companyLine(listed);
+    }
 
     case '/voice/org/number': {
       grant = undefined;
@@ -645,7 +855,7 @@ export async function handleVoiceWebhook(
             digits === '1' ? speak(AI_NOT_AVAILABLE) : [],
           );
         }
-        return languageMenu(digits === '1' ? 'ai' : 'human', 1);
+        return digits === '1' ? languageMenu('ai', 1) : chooseHuman(1);
       }
       if (attempt >= MAX_ATTEMPTS) {
         return orgLine() ? noChoice() : human(undefined);
@@ -672,35 +882,64 @@ export async function handleVoiceWebhook(
 
     case '/voice/ai':
       // Reached from the "try AI instead" offer after a failed human dial.
-      if (
-        digits !== '1' ||
-        language === undefined ||
-        !ctx.aiAvailable ||
-        !canAi()
-      ) {
+      if (digits !== '1' || !ctx.aiAvailable || !canAi()) {
         return response(...speak(GOODBYE), element('Hangup'));
+      }
+      if (language === undefined) {
+        // A company's own interpreter line is dialed with no language, so
+        // the caller picks one now.
+        return menu.entries.length === 0
+          ? response(...speak(GOODBYE), element('Hangup'))
+          : languageMenu('ai', 1);
       }
       return ai(language);
 
     case '/voice/ai-ended':
       await endLeg('AI');
       // The caller hanging up ends everything; any other end means the
-      // gateway closed the stream (backend unavailable or at capacity).
+      // gateway closed the stream: the caller pressed ###, or the backend
+      // is unavailable or at capacity. This route cannot tell which, so the
+      // gateway says "unavailable" itself before closing on a failure, and
+      // either way counts as a switch.
       if (body.get('CallStatus') === 'completed') {
         return response();
       }
-      return human(
-        language,
-        speak(['ai-unavailable', 'The AI interpreter is unavailable.']),
-      );
+      switches = Math.min(switches + 1, MAX_SWITCHES);
+      return human(language);
 
-    case '/voice/human-result':
+    case '/voice/human-result': {
       await endLeg('HUMAN');
-      if (body.get('DialCallStatus') === 'completed') {
-        return response(element('Hangup'));
+      const watched = query.get('wt') === '1';
+      const stopWatch = watched
+        ? [element('Stop', {}, element('Stream', { name: WATCH_STREAM }))]
+        : [];
+      // Twilio leaves out DialCallDuration when the interpreter's leg was
+      // redirected, which only the /watch stream does, on ###.
+      if (
+        body.get('DialCallStatus') === 'completed' &&
+        watched &&
+        !body.has('DialCallDuration') &&
+        canAi()
+      ) {
+        switches = Math.min(switches + 1, MAX_SWITCHES);
+        log('call.switch_to_ai');
+        if (!ctx.aiAvailable || menu.entries.length === 0) {
+          return human(language, [...stopWatch, ...speak(AI_NOT_AVAILABLE)]);
+        }
+        return languageMenu('ai', 1, [SWITCH_TO_AI], stopWatch);
       }
-      if (language !== undefined && ctx.aiAvailable && canAi()) {
+      if (body.get('DialCallStatus') === 'completed') {
+        return response(...stopWatch, element('Hangup'));
+      }
+      // The organization line also offers the AI when no language was chosen
+      // (a company's own interpreter line); the current number does not.
+      if (
+        (language !== undefined || (orgLine() && menu.entries.length > 0)) &&
+        ctx.aiAvailable &&
+        canAi()
+      ) {
         return response(
+          ...stopWatch,
           ...speak([
             'no-interpreter',
             'Sorry, no interpreter is available right now.',
@@ -711,7 +950,7 @@ export async function handleVoiceWebhook(
               input: 'dtmf',
               numDigits: 1,
               timeout: MENU_TIMEOUT_S,
-              action: url('/voice/ai', { lang: language.languageId }),
+              action: url('/voice/ai', { lang: language?.languageId }),
             },
             ...speak([
               'offer-ai',
@@ -723,12 +962,14 @@ export async function handleVoiceWebhook(
         );
       }
       return response(
+        ...stopWatch,
         ...speak([
           'no-interpreter-final',
           'Sorry, no interpreter is available right now. Please try again later. Goodbye.',
         ]),
         element('Hangup'),
       );
+    }
 
     case '/voice/whisper':
       // Heard only by the interpreter. Requiring a keypress stops a

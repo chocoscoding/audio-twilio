@@ -155,6 +155,17 @@
       "modelId": "eleven_v4",
       "approvedAt": "2026-10-13T04:32:02.296Z"
     },
+    "code-invalid": {
+      "file": "code-invalid.wav",
+      "kind": "speech",
+      "group": "org",
+      "text": "Sorry, that access code was not recognized.",
+      "durationMs": 3258,
+      "hash": "b1dd95f6ae215d56",
+      "voiceId": "WqfqZq3UXPCD87IXHLnm",
+      "modelId": "eleven_v4",
+      "approvedAt": "2026-10-23T10:45:09.053Z"
+    },
     "code-not-recognized": {
       "file": "code-not-recognized.wav",
       "kind": "speech",
@@ -329,6 +340,17 @@
       "voiceId": "WqfqZq3UXPCD87IXHLnm",
       "modelId": "eleven_v4",
       "approvedAt": "2026-10-13T04:32:02.320Z"
+    },
+    "interpreter-released": {
+      "file": "interpreter-released.wav",
+      "kind": "speech",
+      "group": "whisper",
+      "text": "The caller has switched to the AI interpreter. Goodbye.",
+      "durationMs": 3506,
+      "hash": "16c64f36acd160a7",
+      "voiceId": "WqfqZq3UXPCD87IXHLnm",
+      "modelId": "eleven_v4",
+      "approvedAt": "2026-10-23T10:45:09.050Z"
     },
     "language-menu-intro": {
       "file": "language-menu-intro.wav",
@@ -605,6 +627,17 @@
       "modelId": "eleven_v4",
       "approvedAt": "2026-10-13T04:32:02.504Z"
     },
+    "switch-to-ai": {
+      "file": "switch-to-ai.wav",
+      "kind": "speech",
+      "group": "ai",
+      "text": "Switching you to the AI interpreter.",
+      "durationMs": 2241,
+      "hash": "31238716a010a9c3",
+      "voiceId": "WqfqZq3UXPCD87IXHLnm",
+      "modelId": "eleven_v4",
+      "approvedAt": "2026-10-23T10:45:09.043Z"
+    },
     "thank-you": {
       "file": "thank-you.wav",
       "kind": "speech",
@@ -626,6 +659,17 @@
       "voiceId": "WqfqZq3UXPCD87IXHLnm",
       "modelId": "eleven_v4",
       "approvedAt": "2026-10-13T04:32:02.508Z"
+    },
+    "welcome-org-17": {
+      "file": "welcome-org-17.wav",
+      "kind": "speech",
+      "group": "company",
+      "text": "Thank you for calling VerbatUm.",
+      "durationMs": 1683,
+      "hash": "1799472b2b17aee4",
+      "voiceId": "WqfqZq3UXPCD87IXHLnm",
+      "modelId": "eleven_v4",
+      "approvedAt": "2026-10-23T10:59:09.042Z"
     },
     "whisper": {
       "file": "whisper.wav",

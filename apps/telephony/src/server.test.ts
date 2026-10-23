@@ -352,6 +352,88 @@ describe('telephony gateway (integration)', () => {
     );
   }, 15_000);
 
+  /** An AI stream that has reached its first tone; `transfer` as the IVR sets it. */
+  async function openAiStream(transfer: boolean) {
+    const ws = new WebSocket(`ws://127.0.0.1:${gateway.port}/media`, {
+      headers: {
+        'x-twilio-signature': twilioSignature(TOKEN, 'ws://gateway.test/media'),
+      },
+    });
+    await once(ws, 'open');
+    const marks: string[] = [];
+    let waiter: (() => void) | undefined;
+    ws.on('message', (data) => {
+      const m = JSON.parse(data.toString()) as { mark?: { name: string } };
+      if (m.mark !== undefined) {
+        marks.push(m.mark.name);
+        waiter?.();
+      }
+    });
+    ws.send(
+      JSON.stringify({
+        event: 'start',
+        streamSid: 'MZ1',
+        start: {
+          accountSid: ACCOUNT_SID,
+          streamSid: 'MZ1',
+          callSid: 'CA1',
+          customParameters: {
+            clinicianLanguageId: 'en-US',
+            patientLanguageId: 'es-US',
+            ...(transfer ? { transfer: '1' } : {}),
+          },
+        },
+      }),
+    );
+    const untilMarks = async (count: number) => {
+      while (marks.length < count) {
+        await new Promise<void>((resolve) => (waiter = resolve));
+      }
+    };
+    await untilMarks(1); // the first tone: the call is live
+    const press = (digit: string) =>
+      ws.send(
+        JSON.stringify({ event: 'dtmf', streamSid: 'MZ1', dtmf: { digit } }),
+      );
+    return { ws, press, untilMarks };
+  }
+
+  it('### closes the AI stream so Twilio continues to a human', async () => {
+    const { ws, press } = await openAiStream(true);
+    const closed = once(ws, 'close');
+    press('#');
+    press('#');
+    press('#');
+    const [code] = (await closed) as [number];
+    expect(code).toBe(1000);
+  }, 10_000);
+
+  it('ignores ### (one double beep) when the IVR did not allow a human', async () => {
+    const { ws, press, untilMarks } = await openAiStream(false);
+    try {
+      press('#');
+      press('#');
+      press('#');
+      await untilMarks(2); // the "not possible" beep, and the stream stays up
+      expect(ws.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      ws.close();
+    }
+  }, 10_000);
+
+  it('a # among other keys does not switch', async () => {
+    const { ws, press } = await openAiStream(true);
+    try {
+      for (const digit of ['#', '#', '5', '#']) {
+        press(digit);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(ws.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      ws.close();
+    }
+  }, 10_000);
+
   it('sends a bearer token when machine auth is configured', async () => {
     const fetchImpl = vi.fn(async () =>
       Response.json({ access_token: 'abc', expires_in: 3600 }),

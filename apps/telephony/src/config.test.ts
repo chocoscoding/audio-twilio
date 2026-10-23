@@ -110,4 +110,26 @@ describe('loadConfig', () => {
       loadConfig({ ...MINIMAL, FOURPOINTS_AUTH: 'client-credentials' }),
     ).toThrowError(/FOURPOINTS_TOKEN_URL is required/);
   });
+
+  it('reads the Twilio API key from TWILIO_ACCOUNT_CLIENT_SID / _SECRET', () => {
+    const sid = `SK${'a'.repeat(32)}`;
+    expect(
+      loadConfig({
+        ...MINIMAL,
+        TWILIO_ACCOUNT_CLIENT_SID: sid,
+        TWILIO_ACCOUNT_CLIENT_SECRET: 'secret',
+      }).twilioApiKey,
+    ).toEqual({ sid, secret: 'secret' });
+    expect(loadConfig(MINIMAL).twilioApiKey).toBeUndefined();
+    expect(() =>
+      loadConfig({ ...MINIMAL, TWILIO_ACCOUNT_CLIENT_SID: sid }),
+    ).toThrowError(/must be set together/);
+    expect(() =>
+      loadConfig({
+        ...MINIMAL,
+        TWILIO_ACCOUNT_CLIENT_SID: 'AC123',
+        TWILIO_ACCOUNT_CLIENT_SECRET: 'secret',
+      }),
+    ).toThrowError(/SK followed by 32 hex/);
+  });
 });

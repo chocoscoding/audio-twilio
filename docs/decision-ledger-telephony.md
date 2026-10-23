@@ -165,3 +165,181 @@ Tradeoff: Changing a line or the menu order needs a regenerated clip (until
   ivr-audio/final (synthetic, approved prompts; no caller audio).
 Status: PROPOSED
 ```
+
+```text
+Decision ID: TELEPHONY-010
+Decision: A company may have phone numbers of its own (dedicated lines). A
+  call is matched to the company by the Twilio number it arrives on (Twilio
+  `To`, covered by the Twilio signature), listed by hand in
+  apps/telephony/src/companies.ts (orgNumber, organizationId, companyName,
+  lines [{twilioNumber, publicNumber?}], optional humanNumber; publicNumber
+  only for a forwarded number, as a record, never matched). A company's
+  number reaches us either FORWARDED (it stays with the company's carrier
+  and forwards to a Twilio number FourPoints buys for that company alone) or
+  PORTED into FourPoints' Twilio account (the call arrives on the company's
+  own number). Numbers not in the list are the shared FourPoints line,
+  unchanged. Twilio's `ForwardedFrom` is not used.
+Reason: Owner, 2026-10-23: companies give their customers their own number
+  and want their own greeting on it. On a forwarded call Twilio sees our
+  number as `To`, and passes the company's number in `ForwardedFrom` only
+  when the forwarding carrier sends it, which Twilio says not all do; a
+  Twilio number per company is always present and cannot be set by the
+  caller. Caller ID is still not proof of who the organization is.
+Evidence: Planned tests: listed number → company flow; unlisted number →
+  shared line; the gateway refuses to start on a duplicate Twilio number,
+  a duplicate orgNumber or a number not in E.164 (+1…) form; an
+  organizationId that does not belong to orgNumber is refused by FourPoints.
+Tradeoff: One Twilio number (about $1–2 a month) per forwarded company. The
+  list lives in code until a FourPoints table (with admin upload behind the
+  existing Cognito-via-ALB login) replaces it; the IVR reads it through a
+  CompanySource interface so that swap does not change the IVR. Needs the
+  FourPoints source-of-truth §6 change (dedicated numbers) to be accepted.
+Status: PROPOSED
+```
+
+```text
+Decision ID: TELEPHONY-011
+Decision: A call on a company number opens with that company's welcome,
+  "Welcome to <companyName>.", instead of the FourPoints
+  welcome. The clip id is always welcome-org-<orgNumber>. The owner records
+  it and imports it with `node ivr-audio/pipeline.mjs import <id> <file>
+  "<text>"` (same processing as generated speech: trimmed, −19 LUFS, 8 kHz
+  mono μ-law; reviewed and approved like any clip). Until a clip with that
+  exact text is approved, the sentence is spoken with <Say>.
+Reason: Owner, 2026-10-23. Clip names need not be hidden. The same
+  "text must match" rule as TELEPHONY-009 keeps a stale or mistyped
+  recording from playing the wrong company's name.
+Evidence: pipeline import tested end to end on a throwaway recording
+  (review files, review page, approve → manifest entry of kind
+  "recording", loaded by the gateway's PromptLibrary). Planned IVR test:
+  missing recording → <Say> of the same sentence.
+Tradeoff: The recording ships in the gateway image with the other prompts;
+  each new company needs a rebuild until recordings move to S3.
+Status: PROPOSED
+```
+
+```text
+Decision ID: TELEPHONY-012
+Decision: On a company number the caller is never asked for an organization
+  ID. The gateway asks FourPoints (POST /internal/phone/line, same machine
+  scope and time limit as /internal/phone/resolve) about the company:
+  - organization-wide access code exists, ACTIVE or PAUSED → the caller must
+    enter a valid access code (the organization's or a person's), checked
+    with the existing /internal/phone/resolve; a wrong code is retried as
+    today ("Sorry, that access code was not recognized.");
+  - no organization-wide code → the call goes straight in, counted under the
+    company, not a person.
+  FourPoints checks organization status, phone access, AI/human entitlement
+  and minutes left on every call and fails closed.
+Reason: Owner, 2026-10-23 (source-of-truth change): with no code, the number
+  itself identifies the company. A paused code still counts as a code, so
+  pausing never opens a line.
+Evidence: Planned tests: with code / paused code / no code; person's code;
+  wrong code retries; not ACTIVE, no phone access, out of minutes →
+  existing goodbyes; FourPoints timeout or error → existing check-failed
+  line.
+Tradeoff: With no code, anyone who knows the number uses the company's
+  minutes; the company accepts this by choosing no code. Removing a
+  company's code opens its line (the admin console should warn later). The
+  onboarding answer access_code_entry does not drive the line; whether a
+  code exists does.
+Status: PROPOSED
+```
+
+```text
+Decision ID: TELEPHONY-013
+Decision: A company may set its own human interpreter line (OPI number,
+  humanNumber). Human calls for that company dial it directly: no language
+  menu (the OPI side sorts out the language) and no "Press 1 to accept"
+  whisper screening. Time on the OPI number counts against the company's
+  monthly minutes, the same as FourPoints human calls. Companies without
+  humanNumber use the FourPoints interpreters as today.
+Reason: Owner, 2026-10-23. An OPI line answers with its own menu or queue
+  and nobody there would press 1, so screening would hang up every call;
+  the caller goes through the OPI menu as if they had dialled it.
+Evidence: Planned tests: company with humanNumber → <Dial> of that number,
+  no language menu, no whisper URL; company without → existing interpreters.
+Tradeoff: Without screening, an OPI voicemail or closed-hours message would
+  pick up and the minutes still count. Live test: a real OPI line works
+  when connected straight through.
+Status: PROPOSED
+```
+
+```text
+Decision ID: TELEPHONY-014
+Decision: Pressing # three times (within 5 s, no other key between) during an
+  AI call moves the caller to a human interpreter, where the organization has
+  human. The gateway drops any half-recorded turn (the key tones are never
+  translated) and closes the media stream; Twilio continues at
+  /voice/ai-ended, the AI usage leg ends and the human leg starts:
+  "Connecting you to a human interpreter. Please hold." → the company's OPI
+  number, or "… for <Language>. Please hold." → the FourPoints interpreters
+  for the call's language. The stream carries only a yes/no transfer flag
+  (no organization data); without it, ### is ignored. Changed behaviour:
+  /voice/ai-ended no longer says "The AI interpreter is unavailable." itself,
+  because it cannot tell a caller's ### from an AI failure; on a failure the
+  gateway plays that line into the stream before closing it.
+Reason: Owner, 2026-10-23. One or two # and * keep working as before.
+Evidence: Planned tests: ### closes the stream; #, ##, too slow, #*# do
+  nothing; no transfer flag → ignored; a half-recorded turn is not sent; the
+  right human number is dialled; AI failure still plays the unavailable line.
+Tradeoff: Callers are not told about ### (would mean re-recording the ten
+  ai-connected-* clips; open question). Live test: Twilio continues at
+  <Connect action> after a server-closed stream (already listed under
+  "Known limits").
+Status: PROPOSED
+```
+
+```text
+Decision ID: TELEPHONY-015
+Decision: Pressing # three times during a human call moves the caller to the
+  AI interpreter, where the organization has AI. Before the human is
+  dialled, the TwiML starts a one-way copy of the CALLER's side of the
+  audio only to the gateway (/watch, same Twilio signature check as /media).
+  The gateway only detects # tones (941 Hz + 1477 Hz) in memory; the audio
+  is never stored, never transcribed and never sent to FourPoints. The
+  interpreter's side is not in the copy, so the interpreter pressing # does
+  nothing. On ###, the gateway uses the Twilio REST API to redirect the
+  interpreter's leg: it hears "The caller has switched to the AI
+  interpreter. Goodbye." and is hung up. Twilio then calls
+  /voice/human-result with the call's state and without DialCallDuration
+  (it is absent when the other leg was redirected), which is how the switch
+  is told apart from the interpreter hanging up. The human usage leg ends;
+  the caller hears "Switching you to the AI interpreter." and then the
+  language menu (no welcome, no AI/human menu), because the OPI side cannot
+  tell us which language was used.
+Reason: Owner, 2026-10-23 (caller-audio copy approved). In a human call
+  Twilio <Dial> joins the two parties directly and does not report
+  keypresses, so the gateway must hear the tones itself.
+Evidence: Planned tests: tone detector on generated # tones, other keys,
+  speech and noise; human-result with and without DialCallDuration; switch
+  line then language menu; REST call time limit and failure. Needs
+  TWILIO_ACCOUNT_CLIENT_SID / TWILIO_ACCOUNT_CLIENT_SECRET on the gateway (stored like the
+  Auth Token) and outbound access to api.twilio.com.
+Tradeoff: If an OPI menu ever asks for ### within 5 s it would switch to AI
+  (an account number then # does not). UNVERIFIED until the live test on an
+  upgraded Twilio number: (1) the # tones are present in the copied audio
+  (some networks send keys out of band and Twilio may strip them; if not,
+  back to the owner — * was offered, not approved); (2) redirecting the
+  interpreter leg ends the <Dial> with completed and no DialCallDuration;
+  (3) a real OPI line works with no screening. Part 3 is not built before
+  that test.
+Status: PROPOSED
+```
+
+```text
+Decision ID: TELEPHONY-016
+Decision: The switch key is ### in both directions, and a call may switch at
+  most 3 times; after that ### is ignored. What the organization has is
+  respected: AI-only means no ### to human, human-only means no caller-audio
+  copy. Presentation mode does not change. 000 was considered and rejected.
+Reason: In a human call the caller is typing into the company's OPI menu,
+  where account numbers, PINs and "press 0 for an operator" would set off
+  000 by accident. The cap stops endless back-and-forth and limits how
+  often the minute cap is reset, since each human leg's time limit is
+  computed from the minutes left at the start of the call.
+Evidence: Planned tests: fourth ### ignored; AI-only and human-only
+  organizations.
+Tradeoff: A caller who needs a fourth switch has to call again.
+Status: PROPOSED
+```

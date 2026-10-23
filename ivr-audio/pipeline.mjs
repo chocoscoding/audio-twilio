@@ -9,11 +9,18 @@
  *             recorded in final/manifest.json; everything else for that clip
  *             is deleted from review/.
  *
+ *   Recordings (import): the owner's own recording of a line that is not in
+ *   script.mjs, such as a company welcome (`welcome-org-<orgNumber>`), gets the
+ *   same speech treatment and goes to review/; `approve` ships it the same way.
+ *   Imported clips are never regenerated, marked stale or removed by the other
+ *   commands; only `approve` (a new take) or editing final/ changes them.
+ *
  *   node pipeline.mjs audition                 one line in each candidate voice
  *   node pipeline.mjs generate [ids|groups]    missing/changed clips (default: all)
  *   node pipeline.mjs music [variants=2]       hold-music-a, hold-music-b, …
+ *   node pipeline.mjs import <id> <file> "<exact text>"   your own recording → review
  *   node pipeline.mjs approve <ids|all>        review → final
- *   node pipeline.mjs redo <ids>               discard and regenerate (new take)
+ *   node pipeline.mjs redo <ids>               discard and regenerate (new take; script clips only)
  *   node pipeline.mjs reject <ids>             discard from review
  *   node pipeline.mjs check [ids]              transcribe review clips, flag any that differ from the script
  *   node pipeline.mjs status
@@ -21,7 +28,8 @@
  *
  * Final format: WAV, 8 kHz, mono, G.711 μ-law — what Twilio <Play> and Media
  * Streams carry natively, so nothing is transcoded on the call.
- * Needs ffmpeg and ELEVENLABS_API_KEY (env or ivr-audio/.env).
+ * Needs ffmpeg and ELEVENLABS_API_KEY (env or ivr-audio/.env); `import`,
+ * `approve`, `reject` and `status` need only ffmpeg.
  */
 
 /* global fetch, FormData */
@@ -36,10 +44,11 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:http';
-import { dirname, join, normalize } from 'node:path';
+import { basename, dirname, join, normalize } from 'node:path';
 import process from 'node:process';
 import { setTimeout } from 'node:timers';
 import { URL, fileURLToPath } from 'node:url';
@@ -476,6 +485,67 @@ async function music(args) {
   );
 }
 
+/** Clip ids the gateway accepts (apps/telephony/src/prompts.ts ID). */
+const CLIP_ID = /^[a-z0-9-]{1,64}$/;
+
+/** Ids that script.mjs or the pipeline owns; an import must not take one. */
+const isPipelineId = (id) =>
+  PROMPTS.some((p) => p.id === id) ||
+  id === MUSIC.id ||
+  id.startsWith(`${MUSIC.id}-`) ||
+  id.startsWith('audition-');
+
+/**
+ * The owner's own recording (any file ffmpeg reads) → review/, processed like
+ * generated speech: silence trimmed, −19 LUFS, 8 kHz mono μ-law. `text` is
+ * what the gateway matches against, so it must be the exact sentence.
+ */
+function importRecording(args) {
+  const [id, file, ...rest] = args;
+  const text = rest.join(' ').trim();
+  if (!id || !file || text === '' || rest.length === 0)
+    throw new Error(
+      'Usage: node pipeline.mjs import <id> <file> "<exact text>"',
+    );
+  if (!CLIP_ID.test(id))
+    throw new Error(
+      `Bad id "${id}": use 1–64 lowercase letters, digits or dashes`,
+    );
+  if (isPipelineId(id))
+    throw new Error(
+      `"${id}" is a script.mjs / pipeline clip; change script.mjs and run generate instead`,
+    );
+  if (!existsSync(file) || !statSync(file).isFile())
+    throw new Error(`No such file: ${file}`);
+  // Lossless mono copy as the review "source" (what the browser plays as
+  // "Studio source"); the μ-law file is made from it exactly as for TTS.
+  const sourceWav = ffmpegOut([
+    '-i',
+    file,
+    '-vn',
+    '-ac',
+    '1',
+    '-ar',
+    String(SOURCE_RATE),
+    '-c:a',
+    'pcm_s16le',
+    '-f',
+    'wav',
+  ]);
+  discardReview(id);
+  saveForReview(id, sourceWav, speechToUlaw, {
+    id,
+    kind: 'recording',
+    group: 'company',
+    text,
+    source: basename(file),
+  });
+  console.log(
+    `  ✓ ${id} → review (${(reviewMeta(id).durationMs / 1000).toFixed(1)} s). ` +
+      `Listen, then: node pipeline.mjs approve ${id}`,
+  );
+}
+
 function approve(args) {
   const ids = args.includes('all') ? reviewIds() : args;
   const manifest = readJson(MANIFEST, {});
@@ -517,6 +587,7 @@ function approve(args) {
       modelId,
       durationMs: ms,
       prompt,
+      source,
     } = meta;
     manifest.clips[finalId] = {
       file: `${finalId}.wav`,
@@ -526,6 +597,7 @@ function approve(args) {
       durationMs: ms,
       ...(hash ? { hash, voiceId, modelId } : {}),
       ...(prompt ? { prompt, take: id } : {}),
+      ...(kind === 'recording' ? { source } : {}),
       approvedAt: new Date().toISOString(),
     };
     discardReview(id);
@@ -592,8 +664,8 @@ async function transcribe(file) {
 
 /** English parts must match word for word; other languages are shown for a human. */
 async function check(args) {
-  const ids = (args.length > 0 ? args : reviewIds()).filter(
-    (id) => reviewMeta(id)?.kind === 'speech',
+  const ids = (args.length > 0 ? args : reviewIds()).filter((id) =>
+    ['speech', 'recording'].includes(reviewMeta(id)?.kind),
   );
   const flagged = [];
   await pool(
@@ -647,6 +719,15 @@ function status() {
   console.log(
     `Hold music: ${manifest.clips[MUSIC.id] ? 'final' : 'not approved'}`,
   );
+  // Clips that are not in script.mjs (imported recordings) are kept as they
+  // are: listed here, never counted as stale or missing.
+  const recordings = Object.entries(manifest.clips)
+    .filter(([id, clip]) => clip.kind === 'recording' && !isPipelineId(id))
+    .map(([id]) => id);
+  if (recordings.length > 0)
+    console.log(
+      `Recordings (imported, final): ${recordings.length} — ${recordings.join(', ')}`,
+    );
   const extra = [...inReview].filter((id) => !PROMPTS.some((p) => p.id === id));
   if (extra.length > 0) console.log(`Also in review: ${extra.join(', ')}`);
   const listed = rows.filter(
@@ -675,6 +756,7 @@ function writeReviewPage() {
     'human',
     'whisper',
     'org',
+    'company',
   ];
   const titles = {
     audition: 'Voice audition — pick one, then set VOICE.voiceId',
@@ -685,6 +767,7 @@ function writeReviewPage() {
     human: 'Human interpreter',
     whisper: 'Heard only by the interpreter',
     org: 'Organization line',
+    company: 'Company welcome — your recordings',
   };
   const metas = reviewIds().map(reviewMeta).filter(Boolean);
   const groups = order
@@ -697,7 +780,7 @@ function writeReviewPage() {
       <tr data-id="${esc(m.id)}">
         <td class="pick"><input type="checkbox" aria-label="Select ${esc(m.id)}"></td>
         <td><code>${esc(m.id)}</code><div class="text">${esc(m.text)}</div>
-          <div class="meta">${((m.durationMs ?? 0) / 1000).toFixed(1)} s${m.voiceId ? ` · voice ${esc(m.voiceId)}` : ''}${m.check ? ` · transcript ${m.check === 'match' ? 'matches script' : '<b class="bad">differs</b>'}` : ''}</div>
+          <div class="meta">${((m.durationMs ?? 0) / 1000).toFixed(1)} s${m.voiceId ? ` · voice ${esc(m.voiceId)}` : ''}${m.kind === 'recording' ? ` · recorded (${esc(m.source ?? 'import')})` : ''}${m.check ? ` · transcript ${m.check === 'match' ? 'matches script' : '<b class="bad">differs</b>'}` : ''}</div>
           ${(m.check && m.check !== 'match') || (m.transcript && m.text !== m.transcript && m.group === 'ai') ? `<div class="meta">Heard: ${esc(m.transcript)}</div>` : ''}</td>
         <td class="players">
           <label>Phone (what callers hear)<audio controls preload="none" src="${esc(m.id)}.phone.wav"></audio></label>
@@ -763,10 +846,23 @@ try {
     case 'music':
       await music(args);
       break;
+    case 'import':
+      importRecording(args);
+      break;
     case 'approve':
       approve(args);
       break;
-    case 'redo':
+    case 'redo': {
+      // Check first: an imported recording (or any id script.mjs does not
+      // know) has nothing to regenerate from, and must not be discarded.
+      const unknown = args.filter(
+        (id) => !id.startsWith(MUSIC.id) && !PROMPTS.some((p) => p.id === id),
+      );
+      if (unknown.length > 0)
+        throw new Error(
+          `Not a script.mjs clip, left as is: ${unknown.join(', ')} ` +
+            '(for a recording, run import again)',
+        );
       for (const id of args) discardReview(id);
       if (args.some((id) => id.startsWith(MUSIC.id))) await music(args);
       if (args.some((id) => !id.startsWith(MUSIC.id)))
@@ -775,6 +871,7 @@ try {
           { fresh: true },
         );
       break;
+    }
     case 'reject':
       reject(args);
       break;
@@ -824,7 +921,7 @@ try {
     }
     default:
       console.log(
-        'Usage: node pipeline.mjs audition | generate [ids|groups] | music [n] | approve <ids|all> | redo <ids> | reject <ids> | status',
+        'Usage: node pipeline.mjs audition | generate [ids|groups] | music [n] | import <id> <file> "<text>" | approve <ids|all> | redo <ids> | reject <ids> | check [ids] | status | serve [port]',
       );
   }
 } catch (error) {

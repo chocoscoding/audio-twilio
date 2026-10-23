@@ -26,6 +26,11 @@ export interface TelephonyConfig {
   publicBaseUrl: string;
   twilioAccountSid: string;
   twilioAuthToken: string;
+  /**
+   * Twilio API key for the REST API. Only ### from a human call to the AI
+   * uses it (releasing the interpreter's leg); unset, that switch is off.
+   */
+  twilioApiKey: { sid: string; secret: string } | undefined;
   validateSignatures: boolean;
   fourPointsUrl: string;
   fourPointsAuth: FourPointsAuthConfig;
@@ -78,6 +83,7 @@ const DEFAULT_PRESENTATION_LANGUAGES = [
 
 const E164 = /^\+[1-9]\d{6,14}$/;
 const ACCOUNT_SID = /^AC[0-9a-f]{32}$/;
+const API_KEY_SID = /^SK[0-9a-f]{32}$/;
 
 export function loadConfig(
   env: Record<string, string | undefined>,
@@ -131,6 +137,21 @@ export function loadConfig(
     );
   }
   const twilioAuthToken = read('TWILIO_AUTH_TOKEN');
+  const apiKeySid = read('TWILIO_ACCOUNT_CLIENT_SID', '');
+  const apiKeySecret = read('TWILIO_ACCOUNT_CLIENT_SECRET', '');
+  if ((apiKeySid === '') !== (apiKeySecret === '')) {
+    problems.push(
+      'TWILIO_ACCOUNT_CLIENT_SID and TWILIO_ACCOUNT_CLIENT_SECRET must be set together',
+    );
+  } else if (apiKeySid !== '' && !API_KEY_SID.test(apiKeySid)) {
+    problems.push(
+      'TWILIO_ACCOUNT_CLIENT_SID must look like SK followed by 32 hex characters',
+    );
+  }
+  const twilioApiKey =
+    API_KEY_SID.test(apiKeySid) && apiKeySecret !== ''
+      ? { sid: apiKeySid, secret: apiKeySecret }
+      : undefined;
 
   const validateSignatures =
     read('TWILIO_VALIDATE_SIGNATURES', 'true') !== 'false';
@@ -265,6 +286,7 @@ export function loadConfig(
     publicBaseUrl,
     twilioAccountSid,
     twilioAuthToken,
+    twilioApiKey,
     validateSignatures,
     fourPointsUrl,
     fourPointsAuth,
