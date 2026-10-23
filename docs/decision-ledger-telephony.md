@@ -381,3 +381,25 @@ Tradeoff: Every company human call now depends on the gateway and adds two
   already existed with <Dial>.
 Status: PROPOSED
 ```
+
+```text
+Decision ID: TELEPHONY-018
+Decision: In the human-call relay (TELEPHONY-017), the caller's keys (other
+  than ###) are sent to the interpreter line as real digits: the gateway
+  waits for a 1 s pause, gives the interpreter's leg TwiML
+  <Play digits="w..."/> followed by a fresh <Connect><Stream> into the same
+  relay, and re-attaches the new stream (15 s limit, else the relay ends as
+  interpreter_ended). A completed ### is never sent. Keys pressed while the
+  line is still ringing are ignored.
+Reason: Live test 2026-10-23: VerbatUm's interpreter line asks callers to
+  press keys, and the DTMF tones the gateway played into the audio were not
+  accepted. Twilio media streams cannot send key events (only media, mark
+  and clear), and <Play digits> is Twilio's way to send real digits.
+Evidence: relay.test.ts (keys batched into one <Play digits>, old stream's
+  stop is not a hang-up, audio flows on the re-joined stream, re-join
+  timeout, ### never sent).
+Tradeoff: Each batch of keys costs one Twilio REST request and a short gap
+  (about a second) in the audio while the leg re-joins; acceptable while
+  the caller is in the line's menu, not mid-conversation.
+Status: PROPOSED
+```

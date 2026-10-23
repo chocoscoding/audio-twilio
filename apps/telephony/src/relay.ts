@@ -10,8 +10,11 @@
  * opens a two-way stream instead (/relay). The gateway rings the interpreter
  * line through the Twilio REST API with TwiML that opens a second two-way
  * stream (/relay-leg), and passes the 8 kHz μ-law frames between the two
- * unchanged. The caller's other keys are played to the interpreter line as
- * tones, so its menus still work.
+ * unchanged. A media stream cannot send keys, and tones played into the
+ * audio were not accepted by an interpreter line's menu (live test), so the
+ * caller's other keys are sent as real digits: the interpreter's leg gets
+ * TwiML `<Play digits>` followed by a fresh `<Connect><Stream>` back into
+ * the same relay (a short gap in the audio while it re-joins).
  *
  * When the relay ends, the gateway closes the caller's stream and Twilio
  * continues at <Connect action> (/voice/relay-ended). That webhook cannot
@@ -25,7 +28,6 @@
 
 import type WebSocket from 'ws';
 
-import { dtmfTone } from './audio.js';
 import type { CompanySource } from './companies.js';
 import type { TelephonyConfig } from './config.js';
 import { KeySequence } from './key-sequence.js';
@@ -52,6 +54,12 @@ const MAX_MESSAGE_BYTES = 16 * 1024;
 /** Hold music goes out 200 ms at a time, a second ahead of playback. */
 const MUSIC_CHUNK_BYTES = 1600;
 const MUSIC_LEAD_MS = 1_000;
+/** Keys are sent once the caller pauses this long (several keys, one send). */
+const DIGIT_PAUSE_MS = 1_000;
+/** The interpreter's leg must re-join within this after sending keys. */
+const REJOIN_TIMEOUT_MS = 15_000;
+/** Keys Twilio <Play digits> can send. */
+const SENDABLE = /^[0-9*#]$/;
 /** Ringing call states that mean nobody will answer. */
 const NOT_ANSWERED = new Set([
   'busy',
@@ -65,12 +73,16 @@ export interface RelayTiming {
   startTimeoutMs: number;
   ringTimeoutMs: number;
   pollMs: number;
+  digitPauseMs: number;
+  rejoinTimeoutMs: number;
 }
 
 const DEFAULT_TIMING: RelayTiming = {
   startTimeoutMs: START_TIMEOUT_MS,
   ringTimeoutMs: RING_TIMEOUT_MS,
   pollMs: POLL_MS,
+  digitPauseMs: DIGIT_PAUSE_MS,
+  rejoinTimeoutMs: REJOIN_TIMEOUT_MS,
 };
 
 type Json = Record<string, unknown>;
@@ -190,6 +202,12 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
   const timers: NodeJS.Timeout[] = [];
   const keys = new KeySequence();
   let stopMusic: (() => void) | undefined;
+  // Keys waiting to be sent to the interpreter line, and whether its leg is
+  // re-joining after a send.
+  let pendingDigits = '';
+  let digitTimer: NodeJS.Timeout | undefined;
+  let rejoining = false;
+  let rejoinTimer: NodeJS.Timeout | undefined;
 
   const send = (socket: WebSocket | undefined, message: Json) => {
     if (socket !== undefined && socket.readyState === socket.OPEN) {
@@ -210,6 +228,8 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
     for (const timer of timers) {
       clearTimeout(timer);
     }
+    clearTimeout(digitTimer);
+    clearTimeout(rejoinTimer);
     stopMusic?.();
     hub.stopWaiting(callSid);
     if (outcome !== undefined && callSid !== '') {
@@ -272,6 +292,16 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
   };
 
   const attachLeg: LegAttach = (socket, sid) => {
+    if (phase === 'connected' && rejoining) {
+      // Back from sending keys: the same call, a new stream.
+      rejoining = false;
+      clearTimeout(rejoinTimer);
+      hub.stopWaiting(callSid);
+      leg = socket;
+      legStreamSid = sid;
+      listenToLeg(socket);
+      return true;
+    }
     if (phase !== 'ringing') {
       return false;
     }
@@ -294,9 +324,23 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
         finish('time_limit', 'time_limit');
       });
     }
+    listenToLeg(socket);
+    return true;
+  };
+
+  /**
+   * One stream of the interpreter's leg. Its end means the interpreter hung
+   * up, unless the gateway just sent keys and the leg is re-joining.
+   */
+  const listenToLeg = (socket: WebSocket) => {
+    const ended = () => {
+      if (leg === socket && !rejoining) {
+        finish('interpreter_ended', 'interpreter_ended');
+      }
+    };
     socket.on('message', (data, isBinary) => {
       const message = parse(data, isBinary);
-      if (message === undefined || phase !== 'connected') {
+      if (message === undefined || phase !== 'connected' || leg !== socket) {
         return;
       }
       if (message['event'] === 'media') {
@@ -305,12 +349,55 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
           send(caller, { event: 'media', streamSid, media: { payload } });
         }
       } else if (message['event'] === 'stop') {
-        finish('interpreter_ended', 'interpreter_ended');
+        ended();
       }
     });
-    socket.on('close', () => finish('interpreter_ended', 'interpreter_ended'));
+    socket.on('close', ended);
     socket.on('error', () => undefined);
-    return true;
+  };
+
+  /** The interpreter leg's TwiML: optional digits, then into this relay. */
+  const legTwiml = (digits = '') =>
+    response(
+      ...(digits === '' ? [] : [element('Play', { digits: `w${digits}` })]),
+      element(
+        'Connect',
+        {},
+        element(
+          'Stream',
+          { url: `${config.publicBaseUrl.replace(/^http/, 'ws')}/relay-leg` },
+          element('Parameter', { name: 'parent', value: callSid }),
+        ),
+      ),
+    );
+
+  /** Send the keys the caller pressed to the interpreter line as digits. */
+  const sendDigits = () => {
+    if (phase !== 'connected' || legSid === undefined || pendingDigits === '') {
+      return;
+    }
+    if (rejoining) {
+      // Still re-joining from the last send; try again once it is back.
+      digitTimer = setTimeout(sendDigits, timing.digitPauseMs);
+      return;
+    }
+    const digits = pendingDigits;
+    pendingDigits = '';
+    rejoining = true;
+    hub.wait(callSid, attachLeg);
+    rejoinTimer = setTimeout(
+      () => finish('rejoin_failed', 'interpreter_ended'),
+      timing.rejoinTimeoutMs,
+    );
+    log('relay.keys_sent', { call: callId, count: digits.length });
+    void rest.updateCall(legSid, legTwiml(digits)).then((ok) => {
+      if (!ok && rejoining) {
+        // The leg was not touched; its stream is still up.
+        rejoining = false;
+        clearTimeout(rejoinTimer);
+        hub.stopWaiting(callSid);
+      }
+    });
   };
 
   /** Ring the interpreter line; watch it until it answers or gives up. */
@@ -324,17 +411,6 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
       finish('no_target', 'no_answer');
       return;
     }
-    const legTwiml = response(
-      element(
-        'Connect',
-        {},
-        element(
-          'Stream',
-          { url: `${config.publicBaseUrl.replace(/^http/, 'ws')}/relay-leg` },
-          element('Parameter', { name: 'parent', value: callSid }),
-        ),
-      ),
-    );
     phase = 'ringing';
     ringStartedAt = Date.now();
     hub.wait(callSid, attachLeg);
@@ -350,7 +426,7 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
     legSid = await rest.createCall({
       to: target,
       from: calledNumber,
-      twiml: legTwiml,
+      twiml: legTwiml(),
       timeoutSeconds: Math.ceil(timing.ringTimeoutMs / 1000) - 5,
     });
     if (phase !== 'ringing') {
@@ -467,15 +543,19 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
           break;
         }
         if (switchAllowed && keys.press(digit)) {
+          // The ### itself never reaches the interpreter line.
+          pendingDigits = pendingDigits.replace(/#+$/, '');
+          clearTimeout(digitTimer);
           switchToAi();
           break;
         }
-        // Everything else reaches the interpreter line's own menu as a tone.
-        send(leg, {
-          event: 'media',
-          streamSid: legStreamSid,
-          media: { payload: Buffer.from(dtmfTone(digit)).toString('base64') },
-        });
+        // Everything else goes to the interpreter line's own menu as real
+        // digits, once the caller pauses.
+        if (SENDABLE.test(digit)) {
+          pendingDigits = (pendingDigits + digit).slice(-32);
+          clearTimeout(digitTimer);
+          digitTimer = setTimeout(sendDigits, timing.digitPauseMs);
+        }
         break;
       }
       case 'stop':

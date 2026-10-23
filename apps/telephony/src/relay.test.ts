@@ -3,11 +3,15 @@ import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type WebSocket from 'ws';
 
-import { dtmfTone } from './audio.js';
 import { StaticCompanySource } from './companies.js';
 import { loadConfig } from './config.js';
 import { PromptLibrary } from './prompts.js';
-import { RelayHub, runRelayCaller, runRelayLeg } from './relay.js';
+import {
+  RelayHub,
+  runRelayCaller,
+  runRelayLeg,
+  type RelayTiming,
+} from './relay.js';
 import type { CallInfo, NewCall, TwilioRest } from './twilio-rest.js';
 
 /**
@@ -98,7 +102,11 @@ function startCaller(
   params: Record<string, string>,
   rest: TwilioRest,
   hub = new RelayHub(),
-  timing = { ringTimeoutMs: 2_000, pollMs: 1_000 },
+  timing: Partial<RelayTiming> = {
+    ringTimeoutMs: 2_000,
+    pollMs: 1_000,
+    digitPauseMs: 20,
+  },
 ) {
   const caller = new FakeSocket();
   const onEnd = vi.fn();
@@ -196,20 +204,19 @@ describe('human-call relay', () => {
     const { rest } = fakeRest();
     const { caller, hub, onEnd } = startCaller({ switch: '1' }, rest);
     await settle();
-    const leg = answer(hub);
+    answer(hub);
     press(caller, '#');
     press(caller, '#');
     press(caller, '#');
+    expect(rest.updateCall).toHaveBeenCalledTimes(1);
     expect(rest.updateCall).toHaveBeenCalledWith(LEG, RELEASE);
     expect(caller.readyState).toBe(3);
     expect(onEnd).toHaveBeenCalledTimes(1);
     expect(hub.take(CALLER)).toBe('switch_to_ai');
     expect(hub.take(CALLER)).toBeUndefined(); // read once
-    // The first two # reached the interpreter line as tones.
-    expect(leg.payloads()).toEqual([
-      Buffer.from(dtmfTone('#')).toString('base64'),
-      Buffer.from(dtmfTone('#')).toString('base64'),
-    ]);
+    await settle(40);
+    // The ### never reached the interpreter line.
+    expect(rest.updateCall).toHaveBeenCalledTimes(1);
   });
 
   it('ignores keys pressed before the line answers, and counts ### afresh after', async () => {
@@ -223,27 +230,83 @@ describe('human-call relay', () => {
     press(caller, '#');
     expect(caller.readyState).toBe(1);
     expect(rest.endCall).not.toHaveBeenCalled();
-    const leg = answer(hub);
+    answer(hub);
     press(caller, '#');
     expect(caller.readyState).toBe(1);
-    expect(leg.payloads()).toHaveLength(1);
     press(caller, '#');
     press(caller, '#');
     expect(caller.readyState).toBe(3);
     expect(hub.take(CALLER)).toBe('switch_to_ai');
   });
 
-  it('other keys reach the interpreter line as tones; ### is passed on when switching is not allowed', async () => {
+  it("sends other keys to the interpreter line as real digits, then re-joins the leg's audio", async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const { rest } = fakeRest();
+    const { caller, hub } = startCaller({ switch: '1' }, rest);
+    await settle();
+    const leg = answer(hub);
+    press(caller, '1');
+    press(caller, '2');
+    press(caller, '#');
+    await settle(40);
+    expect(rest.updateCall).toHaveBeenCalledTimes(1);
+    const twiml = rest.updateCall.mock.calls[0]?.[1] as string;
+    expect(twiml).toContain('<Play digits="w12#"/>');
+    expect(twiml).toContain(`<Parameter name="parent" value="${CALLER}"/>`);
+    // Twilio stops the old stream; that is not the interpreter hanging up.
+    leg.receive({ event: 'stop' });
+    leg.close();
+    expect(caller.readyState).toBe(1);
+    const back = answer(hub);
+    back.receive(media('YmFjaw=='));
+    expect(caller.sent.at(-1)).toEqual({
+      event: 'media',
+      streamSid: 'MZcaller',
+      media: { payload: 'YmFjaw==' },
+    });
+    caller.receive(media('aGk='));
+    expect(back.sent.at(-1)).toEqual({
+      event: 'media',
+      streamSid: 'MZleg',
+      media: { payload: 'aGk=' },
+    });
+    // And the interpreter hanging up on the new stream ends the relay.
+    back.receive({ event: 'stop' });
+    expect(hub.take(CALLER)).toBe('interpreter_ended');
+  });
+
+  it('ends the relay if the leg does not re-join after keys are sent', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const { rest } = fakeRest();
+    const { caller, hub } = startCaller({ switch: '1' }, rest, new RelayHub(), {
+      ringTimeoutMs: 2_000,
+      pollMs: 1_000,
+      digitPauseMs: 10,
+      rejoinTimeoutMs: 40,
+    });
+    await settle();
+    const leg = answer(hub);
+    press(caller, '5');
+    await settle(20);
+    leg.receive({ event: 'stop' });
+    await settle(60);
+    expect(caller.readyState).toBe(3);
+    expect(hub.take(CALLER)).toBe('interpreter_ended');
+  });
+
+  it('### is sent on as digits when switching is not allowed', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const { rest } = fakeRest();
     const { caller, hub } = startCaller({}, rest);
     await settle();
-    const leg = answer(hub);
-    for (const digit of ['1', '#', '#', '#']) {
+    answer(hub);
+    for (const digit of ['#', '#', '#']) {
       press(caller, digit);
     }
-    expect(leg.payloads()).toHaveLength(4);
-    expect(rest.updateCall).not.toHaveBeenCalled();
+    await settle(40);
+    expect(rest.updateCall.mock.calls[0]?.[1]).toContain(
+      '<Play digits="w###"/>',
+    );
     expect(caller.readyState).toBe(1);
   });
 

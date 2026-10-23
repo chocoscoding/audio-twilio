@@ -74,8 +74,9 @@ Twilio number ──HTTPS webhooks──► gateway: IVR  (press 1 AI / 2 human 
      The gateway therefore sees the caller's keys: on `###` the interpreter
      hears "The caller has switched to the AI interpreter. Goodbye." and is
      hung up; the caller hears "Switching you to the AI interpreter." and
-     the language menu. Other keys are played to the interpreter line as
-     tones, so its own menu still works. `HUMAN_RELAY=off` goes back to
+     the language menu. Other keys are sent to the interpreter line as real
+     digits (TwiML `<Play digits>` on its leg, which then re-joins the relay,
+     with a short gap in the audio), so its own menu works. `HUMAN_RELAY=off` goes back to
      plain `<Dial>` (no `###` out of a human call). Calls to FourPoints'
      own interpreters still use `<Dial>`.
    - After the AI greeting, callers who can reach a human hear "To switch to
@@ -272,8 +273,8 @@ AI → human needs neither.
 - **Human → AI by listening to a copy of the audio did not work** (live
   test 2026-10-23: the copy arrived but carried no key tones), so human
   calls on a company line are relayed instead. Still to confirm on real
-  calls: the relay's added delay, that an OPI menu accepts the keys played
-  as tones, and the cost (about $0.031/min against $0.0225/min for
+  calls: the relay's added delay, that an OPI menu accepts the keys sent as
+  digits, and the cost (about $0.031/min against $0.0225/min for
   `<Dial>`, from Twilio's US prices of August 2026).
 - The reason a relay ended is kept in the gateway's memory for
   `/voice/relay-ended`. Helicarrier runs one instance; with several, a call
