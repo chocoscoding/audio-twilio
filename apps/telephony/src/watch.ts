@@ -37,6 +37,15 @@ export interface WatchOptions {
 
 type Json = Record<string, unknown>;
 
+/** A frame above about -40 dBFS RMS: someone or something is making sound. */
+const isLoud = (samples: Int16Array): boolean => {
+  let sum = 0;
+  for (const s of samples) {
+    sum += s * s;
+  }
+  return samples.length > 0 && Math.sqrt(sum / samples.length) > 328;
+};
+
 const isJson = (value: unknown): value is Json =>
   typeof value === 'object' && value !== null;
 
@@ -57,6 +66,18 @@ export function runWatch(twilio: WebSocket, options: WatchOptions): void {
   let dtmfEvents = false;
   const detector = new DtmfToneDetector();
   const sequence = new KeySequence();
+  // Content-free counts, logged when the stream ends, so a missed ### can be
+  // told apart: no audio, audio without key tones, or tones not recognised.
+  // Never the digits themselves (they may be an interpreter line's PIN).
+  const seen = {
+    frames: 0,
+    otherTrack: 0,
+    loud: 0,
+    keys: 0,
+    pounds: 0,
+    events: 0,
+  };
+  const tracks = new Set<string>();
 
   const endWatch = (reason: string) => {
     if (ended) {
@@ -64,7 +85,12 @@ export function runWatch(twilio: WebSocket, options: WatchOptions): void {
     }
     ended = true;
     clearTimeout(startTimer);
-    log('watch.ended', { call: callId, reason });
+    log('watch.ended', {
+      call: callId,
+      reason,
+      ...seen,
+      tracks: [...tracks].join(',') || 'none',
+    });
     options.onEnd();
   };
 
@@ -76,6 +102,10 @@ export function runWatch(twilio: WebSocket, options: WatchOptions): void {
   };
 
   const onKey = (digit: string) => {
+    seen.keys += 1;
+    if (digit === '#') {
+      seen.pounds += 1;
+    }
     if (switchRequested || !sequence.press(digit)) {
       return;
     }
@@ -135,6 +165,16 @@ export function runWatch(twilio: WebSocket, options: WatchOptions): void {
         break;
       case 'media': {
         const media = message['media'];
+        if (isJson(media)) {
+          seen.frames += 1;
+          const track = media['track'];
+          if (typeof track === 'string' && tracks.size < 4) {
+            tracks.add(track.slice(0, 32));
+          }
+          if (track !== undefined && track !== 'inbound') {
+            seen.otherTrack += 1;
+          }
+        }
         if (
           callSid !== '' &&
           !dtmfEvents &&
@@ -144,6 +184,9 @@ export function runWatch(twilio: WebSocket, options: WatchOptions): void {
           (media['track'] === undefined || media['track'] === 'inbound')
         ) {
           const samples = decodeMulaw(Buffer.from(media['payload'], 'base64'));
+          if (isLoud(samples)) {
+            seen.loud += 1;
+          }
           for (const digit of detector.push(samples)) {
             onKey(digit);
           }
@@ -158,6 +201,7 @@ export function runWatch(twilio: WebSocket, options: WatchOptions): void {
           typeof dtmf['digit'] === 'string' &&
           dtmf['digit'].length === 1
         ) {
+          seen.events += 1;
           if (!dtmfEvents) {
             dtmfEvents = true;
             sequence.reset(); // drop any tone-detected press of this key

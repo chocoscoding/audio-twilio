@@ -46,6 +46,14 @@ const HOLD_MUSIC_LEAD_MS = 1_000;
 /** Never wait on a greeting's mark longer than its length plus this. */
 const GREETING_MARK_SLACK_MS = 3_000;
 const GREETING_MARK = 'greeting';
+/**
+ * Said after the AI greeting, only when ### can reach a human on this call.
+ * English only; the language greetings stay as recorded.
+ */
+export const SWITCH_HINT = [
+  'switch-hint',
+  'To switch to a human interpreter, press pound three times.',
+] as const;
 /** Said before the stream closes on a failure; /voice/ai-ended then dials a human. */
 const UNAVAILABLE_CLIP = 'ai-unavailable';
 
@@ -337,6 +345,12 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
         : undefined;
     if (greeting !== undefined) {
       await playGreeting(greeting);
+    }
+    const hint = transferAllowed
+      ? options.prompts?.match(...SWITCH_HINT)
+      : undefined;
+    if (hint !== undefined && !ended) {
+      await playGreeting(hint);
     }
     const ok = await holdMusicUntil(ready);
     if (ended) {

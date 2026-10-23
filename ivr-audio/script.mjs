@@ -146,6 +146,11 @@ const FIXED = [
   ),
   line('ai-unavailable', 'ai', 'The AI interpreter is unavailable.'),
   // `###` during a human call: the caller hears this, then the language menu.
+  line(
+    'switch-hint',
+    'ai',
+    'To switch to a human interpreter, press pound three times.',
+  ),
   line('switch-to-ai', 'ai', 'Switching you to the AI interpreter.'),
   line(
     'ai-try-later',

@@ -627,6 +627,17 @@
       "modelId": "eleven_v4",
       "approvedAt": "2026-10-13T04:32:02.504Z"
     },
+    "switch-hint": {
+      "file": "switch-hint.wav",
+      "kind": "speech",
+      "group": "ai",
+      "text": "To switch to a human interpreter, press pound three times.",
+      "durationMs": 4043,
+      "hash": "1a748aee5fe2c6d4",
+      "voiceId": "WqfqZq3UXPCD87IXHLnm",
+      "modelId": "eleven_v4",
+      "approvedAt": "2026-10-23T13:26:45.669Z"
+    },
     "switch-to-ai": {
       "file": "switch-to-ai.wav",
       "kind": "speech",

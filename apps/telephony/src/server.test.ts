@@ -470,6 +470,11 @@ describe('recorded prompts (integration)', () => {
       text: 'Hold music',
       mulaw: new Uint8Array(1600).fill(0x22),
     },
+    {
+      id: 'switch-hint',
+      text: 'To switch to a human interpreter, press pound three times.',
+      mulaw: new Uint8Array(800).fill(0x33),
+    },
   ]);
   let fake: FakeFourPoints;
   let gateway: TelephonyServer;
@@ -504,7 +509,7 @@ describe('recorded prompts (integration)', () => {
   });
 
   /** Opens a stream with the greeting and records what the gateway sends, in order. */
-  async function call() {
+  async function call(transfer = false) {
     const ws = new WebSocket(`ws://127.0.0.1:${gateway.port}/media`, {
       headers: {
         'x-twilio-signature': twilioSignature(TOKEN, 'ws://gateway.test/media'),
@@ -558,6 +563,7 @@ describe('recorded prompts (integration)', () => {
             clinicianLanguageId: 'en-US',
             patientLanguageId: 'es-US',
             greeting: 'ai-connected-es-us',
+            ...(transfer ? { transfer: '1' } : {}),
           },
         },
       }),
@@ -591,6 +597,28 @@ describe('recorded prompts (integration)', () => {
       ws.close();
     }
   }, 10_000);
+
+  it('says how to reach a human after the greeting, only when ### can reach one', async () => {
+    await start(0);
+    for (const transfer of [true, false]) {
+      const { ws, events, until, echo } = await call(transfer);
+      try {
+        await until(() => events.some((e) => e.mark === 'greeting'));
+        echo('greeting');
+        if (transfer) {
+          await until(
+            () => events.filter((e) => e.mark === 'greeting').length === 2,
+          );
+          expect(bytesOf(events, 0x33)).toBe(800);
+          echo('greeting');
+        }
+        await until(() => events.some((e) => e.mark === 'm1'));
+        expect(bytesOf(events, 0x33)).toBe(transfer ? 800 : 0);
+      } finally {
+        ws.close();
+      }
+    }
+  }, 15_000);
 
   it('goes straight from the greeting to the first tone when FourPoints is already ready', async () => {
     await start(0);
