@@ -7,7 +7,7 @@ speech recognition, translation and speech output.
 
 ```
 Caller ── Twilio ──HTTPS/WSS──▶ gateway (:8080) ──WSS──▶ FourPoints realtime (/ws/telephony)
-                  /voice/*, /media, /watch                conversation.start {clinician, patient}
+                  /voice/*, /media, /relay, /relay-leg     conversation.start {clinician, patient}
 ```
 
 ## Where it runs: Helicarrier
@@ -39,7 +39,12 @@ Every variable is described in `apps/telephony/.env.example`. The gateway
 checks them at start-up and refuses to start with a list of problems, so a
 bad value shows up as a failed deploy, not a broken call. In particular
 `TWILIO_ACCOUNT_CLIENT_SID` must be `SK` + 32 hex characters and set together
-with `_SECRET` (needed for `###` from a human call to the AI).
+with `_SECRET` (needed for the human-call relay and so for `###` from a human
+call to the AI).
+
+`HUMAN_RELAY` (not set today, so `company`): set it to `off` in Helicarrier
+to send company human calls through plain Twilio `<Dial>` again, without a
+code change; `###` then can't leave a human call.
 
 Company numbers (`apps/telephony/src/companies.ts`) and recorded prompts
 (`ivr-audio/final`) ship inside the image, so adding a company or a prompt

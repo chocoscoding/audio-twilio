@@ -49,8 +49,9 @@ const access =
         ),
       );
 
-// ### from a human call to the AI releases the interpreter's leg through
-// the Twilio REST API; without an API key that switch is simply off.
+// Human calls on a company's own interpreter line are relayed through the
+// gateway (relay.ts), which rings that line with the Twilio REST API; without
+// an API key they use plain <Dial> and ### can't leave them.
 const rest =
   config.twilioApiKey === undefined
     ? undefined
@@ -106,7 +107,7 @@ log('telephony.listening', {
   auth: config.fourPointsAuth.mode,
   organizationLine: access !== undefined,
   companyNumbers: COMPANIES.length,
-  humanToAi: rest !== undefined,
+  humanRelay: rest !== undefined && config.humanRelay === 'company',
   maxCalls: config.maxCalls,
   recordedPrompts: prompts.size,
 });

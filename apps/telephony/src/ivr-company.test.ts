@@ -397,45 +397,56 @@ describe('### between AI and human', () => {
     expect(actionOf(twiml, '/voice/human-result')).toMatchObject({ sw: '1' });
   });
 
-  it('starts a caller-side watch stream on human calls when the switch to AI is possible', async () => {
+  it('relays a company interpreter call through the gateway, with only yes/no and numbers in the stream', async () => {
     const twiml = await hook(
       '/voice/ai-ended',
       spanish,
       { CallStatus: 'in-progress' },
-      { access: fakeAccess(GRANTED).access, humanToAi: true },
+      { access: fakeAccess(GRANTED).access, humanRelay: true },
     );
     expect(twiml).toContain(
-      `<Start><Stream name="watch" url="wss://phone.example.com/watch" track="inbound_track"/></Start>`,
+      'Connecting you to a human interpreter. Please hold.',
     );
-    expect(actionOf(twiml, '/voice/human-result')).toMatchObject({ wt: '1' });
-    // Without Twilio REST, or for a human-only company, there is none.
-    for (const overrides of [
-      { humanToAi: false },
-      { humanToAi: true, query: { ai: '0' } },
-    ] as const) {
-      const other = await hook(
-        '/voice/ai-ended',
-        { ...spanish, ...('query' in overrides ? overrides.query : {}) },
-        { CallStatus: 'in-progress' },
-        {
-          access: fakeAccess(GRANTED).access,
-          humanToAi: overrides.humanToAi,
-        },
-      );
-      expect(other).not.toContain('<Start>');
-    }
+    expect(twiml).toContain('<Stream url="wss://phone.example.com/relay">');
+    expect(twiml).toContain('<Parameter name="lang" value="es-US"/>');
+    expect(twiml).toContain('<Parameter name="limit" value="2520"/>');
+    expect(twiml).toContain('<Parameter name="switch" value="1"/>');
+    expect(twiml).not.toMatch(/<Parameter name="(org|organization|co|emp)/);
+    expect(twiml).not.toContain('<Dial');
+    expect(actionOf(twiml, '/voice/relay-ended')).toMatchObject({
+      ...ACME_GRANT,
+      leg: '1',
+      lang: 'es-US',
+      sw: '1',
+    });
+    // Relay off, or a company with no AI: plain <Dial>, or no switch.
+    const dial = await hook(
+      '/voice/ai-ended',
+      spanish,
+      { CallStatus: 'in-progress' },
+      { access: fakeAccess(GRANTED).access, humanRelay: false },
+    );
+    expect(dial).toContain(`<Number>${OPI}</Number>`);
+    expect(dial).not.toContain('/relay');
+    const noAi = await hook(
+      '/voice/mode',
+      { ...ACME_GRANT, ai: '0', attempt: '1' },
+      { Digits: '2' },
+      { access: fakeAccess(GRANTED).access, humanRelay: true },
+    );
+    expect(noAi).toContain('/relay');
+    expect(noAi).not.toContain('name="switch"');
   });
 
-  it('human → AI: a released interpreter (no DialCallDuration) reads the language menu', async () => {
+  it('human → AI: a relay ended by ### reads the language menu, with no welcome', async () => {
     const f = fakeAccess(GRANTED);
     const twiml = await hook(
-      '/voice/human-result',
-      { ...ACME_GRANT, leg: '1', wt: '1' },
-      { DialCallStatus: 'completed' },
-      { access: f.access, humanToAi: true },
+      '/voice/relay-ended',
+      { ...ACME_GRANT, leg: '1' },
+      { CallStatus: 'in-progress' },
+      { access: f.access, relayOutcome: () => 'switch_to_ai' },
     );
     expect(f.events).toMatchObject([{ event: 'end', mode: 'HUMAN' }]);
-    expect(twiml).toContain('<Stop><Stream name="watch"/></Stop>');
     expect(twiml).toContain(
       'Switching you to the AI interpreter. Please choose a language. For Spanish, press 1.',
     );
@@ -447,16 +458,36 @@ describe('### between AI and human', () => {
     });
   });
 
-  it('an interpreter hanging up normally still ends the call', async () => {
-    const twiml = await hook(
-      '/voice/human-result',
-      { ...ACME_GRANT, leg: '1', wt: '1' },
-      { DialCallStatus: 'completed', DialCallDuration: '300' },
-      { access: fakeAccess(GRANTED).access, humanToAi: true },
-    );
-    expect(twiml).toContain('<Stop><Stream name="watch"/></Stop>');
-    expect(twiml).toContain('<Hangup/>');
-    expect(twiml).not.toContain('choose a language');
+  it('a relay the interpreter ended hangs up; no answer or an unknown reason offers the AI', async () => {
+    for (const outcome of ['interpreter_ended', 'time_limit'] as const) {
+      const twiml = await hook(
+        '/voice/relay-ended',
+        { ...ACME_GRANT, leg: '1' },
+        { CallStatus: 'in-progress' },
+        { access: fakeAccess(GRANTED).access, relayOutcome: () => outcome },
+      );
+      expect(twiml).toContain('<Hangup/>');
+      expect(twiml).not.toContain('choose a language');
+    }
+    for (const outcome of ['no_answer', undefined] as const) {
+      const twiml = await hook(
+        '/voice/relay-ended',
+        { ...ACME_GRANT, leg: '1' },
+        { CallStatus: 'in-progress' },
+        { access: fakeAccess(GRANTED).access, relayOutcome: () => outcome },
+      );
+      expect(twiml).toContain('Sorry, no interpreter is available right now.');
+      expect(twiml).toContain('To use the AI interpreter instead, press 1.');
+    }
+    // The caller hanging up ends everything.
+    expect(
+      await hook(
+        '/voice/relay-ended',
+        { ...ACME_GRANT, leg: '1' },
+        { CallStatus: 'completed' },
+        { access: fakeAccess(GRANTED).access },
+      ),
+    ).not.toContain('<Gather');
   });
 
   it(`stops offering ### after ${MAX_SWITCHES} switches`, async () => {
@@ -464,7 +495,7 @@ describe('### between AI and human', () => {
       '/voice/ai-ended',
       { ...spanish, sw: String(MAX_SWITCHES - 1) },
       { CallStatus: 'in-progress' },
-      { access: fakeAccess(GRANTED).access, humanToAi: true },
+      { access: fakeAccess(GRANTED).access, humanRelay: false },
     );
     expect(actionOf(twiml, '/voice/human-result')).toMatchObject({
       sw: String(MAX_SWITCHES),

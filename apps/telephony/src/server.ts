@@ -6,8 +6,9 @@
  *   POST /voice/*   Twilio webhooks → TwiML (signature-checked); the
  *                   organization line (/voice/org/*) also calls FourPoints
  *   WS   /media     Twilio bidirectional Media Streams (signature-checked)
- *   WS   /watch     caller-side copy of a human call, only listened to for
- *                   ### (watch.ts; signature-checked; nothing is kept)
+ *   WS   /relay     a human call's caller side, relayed by the gateway so it
+ *                   sees ### (relay.ts; signature-checked)
+ *   WS   /relay-leg the interpreter line's side of the same relay
  *
  * The only per-instance state is a count of active calls, used to refuse new
  * AI streams at MAX_CALLS. A refused stream is not an outage: Twilio continues
@@ -42,13 +43,11 @@ import {
 import { runPresentationStream } from './presentation-stream.js';
 import type { TwilioRest } from './twilio-rest.js';
 import { isValidTwilioSignature } from './twilio-signature.js';
-import { response } from './twiml.js';
-import { runWatch } from './watch.js';
+import { element, response } from './twiml.js';
+import { RelayHub, runRelayCaller, runRelayLeg } from './relay.js';
 
 const MAX_WEBHOOK_BODY_BYTES = 16 * 1024;
 const MAX_TWILIO_MESSAGE_BYTES = 64 * 1024;
-/** Watch streams are tiny (tone detection only); human calls per instance. */
-const WATCH_STREAMS_PER_CALL_SLOT = 4;
 
 export interface TelephonyServerOptions {
   config: TelephonyConfig;
@@ -111,7 +110,10 @@ export async function createTelephonyServer(
 ): Promise<TelephonyServer> {
   const { config } = options;
   let activeCalls = 0;
-  let activeWatches = 0;
+  // Why each human-call relay ended, for /voice/relay-ended (relay.ts).
+  const relays = new RelayHub();
+  const humanRelay =
+    options.rest !== undefined && config.humanRelay === 'company';
   let draining = false;
   const aiAvailable = () => !draining && activeCalls < config.maxCalls;
 
@@ -191,7 +193,8 @@ export async function createTelephonyServer(
         ...(options.companies === undefined
           ? {}
           : { companies: options.companies }),
-        humanToAi: options.rest !== undefined,
+        humanRelay,
+        relayOutcome: (callSid: string) => relays.take(callSid),
         log,
       },
     );
@@ -233,7 +236,11 @@ export async function createTelephonyServer(
       );
     };
     const url = new URL(req.url ?? '/', 'http://gateway.invalid');
-    if (url.pathname !== '/media' && url.pathname !== '/watch') {
+    if (
+      url.pathname !== '/media' &&
+      url.pathname !== '/relay' &&
+      url.pathname !== '/relay-leg'
+    ) {
       refuse(404, 'unknown_path');
       return;
     }
@@ -251,27 +258,38 @@ export async function createTelephonyServer(
         return;
       }
     }
-    if (url.pathname === '/watch') {
+    if (url.pathname === '/relay-leg') {
+      // The interpreter line answering; joins the caller waiting for it.
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        runRelayLeg(ws, { accountSid: config.twilioAccountSid, hub: relays });
+      });
+      return;
+    }
+    if (url.pathname === '/relay') {
       const rest = options.rest;
-      if (
-        rest === undefined ||
-        draining ||
-        activeWatches >= config.maxCalls * WATCH_STREAMS_PER_CALL_SLOT
-      ) {
-        // The human call goes on; only ### to the AI is lost.
-        refuse(503, rest === undefined ? 'no_rest' : 'watch_at_capacity');
+      if (rest === undefined || !aiAvailable()) {
+        // Twilio continues at <Connect action>: told no one is available.
+        refuse(503, rest === undefined ? 'no_rest' : 'at_capacity');
         return;
       }
       wss.handleUpgrade(req, socket, head, (ws) => {
-        activeWatches += 1;
-        runWatch(ws, {
-          accountSid: config.twilioAccountSid,
+        activeCalls += 1;
+        runRelayCaller(ws, {
+          config,
           rest,
+          hub: relays,
+          ...(options.companies === undefined
+            ? {}
+            : { companies: options.companies }),
+          ...(options.prompts === undefined
+            ? {}
+            : { prompts: options.prompts }),
           releaseTwiml: response(
             ...speakLines(config, options.prompts, INTERPRETER_RELEASED),
+            element('Hangup'),
           ),
           onEnd: () => {
-            activeWatches -= 1;
+            activeCalls -= 1;
           },
         });
       });

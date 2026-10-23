@@ -34,6 +34,7 @@ import {
   type MenuEntry,
 } from './languages.js';
 import type { PromptLibrary } from './prompts.js';
+import type { RelayOutcome } from './relay.js';
 import { element, escapeXml, response, say } from './twiml.js';
 
 export interface IvrContext {
@@ -48,10 +49,12 @@ export interface IvrContext {
   /** Companies with a number of their own. */
   companies?: CompanySource;
   /**
-   * True when the gateway can release a human interpreter (Twilio REST
-   * configured), so ### during a human call can switch to the AI.
+   * True when human calls to a company's own interpreter line are relayed
+   * through the gateway (relay.ts), so ### during them can switch to the AI.
    */
-  humanToAi?: boolean;
+  humanRelay?: boolean;
+  /** Why the relay for a call ended, once (relay.ts RelayHub.take). */
+  relayOutcome?: (callSid: string) => RelayOutcome | undefined;
   /** Content-free operational log. */
   log?: (
     event: string,
@@ -112,8 +115,6 @@ export const aiGreeting = (entry: MenuEntry): Line => [
 const MAX_ATTEMPTS = 3;
 /** ### switches between AI and human at most this many times per call. */
 export const MAX_SWITCHES = 3;
-/** Name of the caller-side <Start><Stream> that listens for ### (watch.ts). */
-const WATCH_STREAM = 'watch';
 /**
  * Seconds Twilio waits for a key — before the first and between digits —
  * after the prompt ends. Callers said 6 s felt rushed (owner, 2026-10-13).
@@ -355,26 +356,41 @@ export async function handleVoiceWebhook(
             : config.humanNumbers[entry.languageId]) ??
           config.humanNumbers['default'] ??
           []);
-    // ### to the AI: a caller-side copy of the call listens for the tones.
-    const watch =
-      ctx.humanToAi === true &&
-      canSwitch() &&
-      canAi() &&
-      menu.entries.length > 0;
+    const limit =
+      grant === undefined ? undefined : Math.max(grant.minutes, 1) * 60;
+    // A company's own line goes through the gateway, which then sees ###
+    // (relay.ts); Twilio <Dial> would hide every keypress.
+    if (opi !== undefined && ctx.humanRelay === true) {
+      return [
+        ...speak(HUMAN_CONNECTING),
+        element(
+          'Connect',
+          { action: url('/voice/relay-ended', { lang: entry?.languageId }) },
+          element(
+            'Stream',
+            { url: `${config.publicBaseUrl.replace(/^http/, 'ws')}/relay` },
+            ...(entry === undefined
+              ? []
+              : [
+                  element('Parameter', {
+                    name: 'lang',
+                    value: entry.languageId,
+                  }),
+                ]),
+            ...(limit === undefined
+              ? []
+              : [
+                  element('Parameter', { name: 'limit', value: String(limit) }),
+                ]),
+            // A yes/no only: never the organization.
+            ...(canSwitch() && canAi() && menu.entries.length > 0
+              ? [element('Parameter', { name: 'switch', value: '1' })]
+              : []),
+          ),
+        ),
+      ];
+    }
     return [
-      ...(watch
-        ? [
-            element(
-              'Start',
-              {},
-              element('Stream', {
-                name: WATCH_STREAM,
-                url: `${config.publicBaseUrl.replace(/^http/, 'ws')}/watch`,
-                track: 'inbound_track',
-              }),
-            ),
-          ]
-        : []),
       ...speak(
         entry === undefined || opi !== undefined
           ? HUMAN_CONNECTING
@@ -389,12 +405,8 @@ export async function handleVoiceWebhook(
           answerOnBridge: true,
           timeout: 30,
           // Organization line: never past the minutes left this month.
-          timeLimit:
-            grant === undefined ? undefined : Math.max(grant.minutes, 1) * 60,
-          action: url('/voice/human-result', {
-            lang: entry?.languageId,
-            wt: watch ? 1 : undefined,
-          }),
+          timeLimit: limit,
+          action: url('/voice/human-result', { lang: entry?.languageId }),
         },
         ...numbers.map((number) =>
           element(
@@ -520,6 +532,43 @@ export async function handleVoiceWebhook(
     if (result !== 'recorded') {
       log('usage.end_failed', { mode });
     }
+  };
+
+  /** Nobody answered: offer the AI where it can help, else goodbye. */
+  const noInterpreter = (): string => {
+    // The organization line also offers the AI when no language was chosen
+    // (a company's own interpreter line); the current number does not.
+    if (
+      (language !== undefined || (orgLine() && menu.entries.length > 0)) &&
+      ctx.aiAvailable &&
+      canAi()
+    ) {
+      return response(
+        ...speak([
+          'no-interpreter',
+          'Sorry, no interpreter is available right now.',
+        ]),
+        element(
+          'Gather',
+          {
+            input: 'dtmf',
+            numDigits: 1,
+            timeout: MENU_TIMEOUT_S,
+            action: url('/voice/ai', { lang: language?.languageId }),
+          },
+          ...speak(['offer-ai', 'To use the AI interpreter instead, press 1.']),
+        ),
+        ...speak(GOODBYE),
+        element('Hangup'),
+      );
+    }
+    return response(
+      ...speak([
+        'no-interpreter-final',
+        'Sorry, no interpreter is available right now. Please try again later. Goodbye.',
+      ]),
+      element('Hangup'),
+    );
   };
 
   const human = async (
@@ -907,68 +956,36 @@ export async function handleVoiceWebhook(
       switches = Math.min(switches + 1, MAX_SWITCHES);
       return human(language);
 
-    case '/voice/human-result': {
+    case '/voice/human-result':
       await endLeg('HUMAN');
-      const watched = query.get('wt') === '1';
-      const stopWatch = watched
-        ? [element('Stop', {}, element('Stream', { name: WATCH_STREAM }))]
-        : [];
-      // Twilio leaves out DialCallDuration when the interpreter's leg was
-      // redirected, which only the /watch stream does, on ###.
-      if (
-        body.get('DialCallStatus') === 'completed' &&
-        watched &&
-        !body.has('DialCallDuration') &&
-        canAi()
-      ) {
-        switches = Math.min(switches + 1, MAX_SWITCHES);
-        log('call.switch_to_ai');
-        if (!ctx.aiAvailable || menu.entries.length === 0) {
-          return human(language, [...stopWatch, ...speak(AI_NOT_AVAILABLE)]);
-        }
-        return languageMenu('ai', 1, [SWITCH_TO_AI], stopWatch);
-      }
       if (body.get('DialCallStatus') === 'completed') {
-        return response(...stopWatch, element('Hangup'));
+        return response(element('Hangup'));
       }
-      // The organization line also offers the AI when no language was chosen
-      // (a company's own interpreter line); the current number does not.
-      if (
-        (language !== undefined || (orgLine() && menu.entries.length > 0)) &&
-        ctx.aiAvailable &&
-        canAi()
-      ) {
-        return response(
-          ...stopWatch,
-          ...speak([
-            'no-interpreter',
-            'Sorry, no interpreter is available right now.',
-          ]),
-          element(
-            'Gather',
-            {
-              input: 'dtmf',
-              numDigits: 1,
-              timeout: MENU_TIMEOUT_S,
-              action: url('/voice/ai', { lang: language?.languageId }),
-            },
-            ...speak([
-              'offer-ai',
-              'To use the AI interpreter instead, press 1.',
-            ]),
-          ),
-          ...speak(GOODBYE),
-          element('Hangup'),
-        );
+      return noInterpreter();
+
+    case '/voice/relay-ended': {
+      // The relay closed the caller's stream; relay.ts kept the reason.
+      await endLeg('HUMAN');
+      if (body.get('CallStatus') === 'completed') {
+        return response();
       }
-      return response(
-        ...stopWatch,
-        ...speak([
-          'no-interpreter-final',
-          'Sorry, no interpreter is available right now. Please try again later. Goodbye.',
-        ]),
-        element('Hangup'),
-      );
+      const outcome = ctx.relayOutcome?.(callSid);
+      log('relay.outcome', { outcome: outcome ?? 'unknown' });
+      if (outcome === 'switch_to_ai' && canAi()) {
+        switches = Math.min(switches + 1, MAX_SWITCHES);
+        if (!ctx.aiAvailable || menu.entries.length === 0) {
+          return response(
+            ...speak(AI_NOT_AVAILABLE, GOODBYE),
+            element('Hangup'),
+          );
+        }
+        return languageMenu('ai', 1, [SWITCH_TO_AI]);
+      }
+      if (outcome === 'interpreter_ended' || outcome === 'time_limit') {
+        return response(element('Hangup'));
+      }
+      // No answer, or a reason this instance doesn't know.
+      return noInterpreter();
     }
 
     case '/voice/whisper':

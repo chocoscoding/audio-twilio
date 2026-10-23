@@ -31,6 +31,12 @@ export interface TelephonyConfig {
    * uses it (releasing the interpreter's leg); unset, that switch is off.
    */
   twilioApiKey: { sid: string; secret: string } | undefined;
+  /**
+   * `company` (default): a human call to a company's own interpreter line is
+   * relayed through the gateway, so ### works both ways (needs the API key).
+   * `off`: plain Twilio <Dial>; ### can't leave a human call.
+   */
+  humanRelay: 'company' | 'off';
   validateSignatures: boolean;
   fourPointsUrl: string;
   fourPointsAuth: FourPointsAuthConfig;
@@ -148,6 +154,12 @@ export function loadConfig(
       'TWILIO_ACCOUNT_CLIENT_SID must look like SK followed by 32 hex characters',
     );
   }
+  const humanRelayValue = read('HUMAN_RELAY', 'company');
+  if (humanRelayValue !== 'company' && humanRelayValue !== 'off') {
+    problems.push('HUMAN_RELAY must be "company" or "off"');
+  }
+  const humanRelay: 'company' | 'off' =
+    humanRelayValue === 'off' ? 'off' : 'company';
   const twilioApiKey =
     API_KEY_SID.test(apiKeySid) && apiKeySecret !== ''
       ? { sid: apiKeySid, secret: apiKeySecret }
@@ -287,6 +299,7 @@ export function loadConfig(
     twilioAccountSid,
     twilioAuthToken,
     twilioApiKey,
+    humanRelay,
     validateSignatures,
     fourPointsUrl,
     fourPointsAuth,

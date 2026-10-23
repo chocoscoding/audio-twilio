@@ -221,3 +221,50 @@ export const CUES = {
 } as const;
 
 export type Cue = keyof typeof CUES;
+
+/** DTMF row and column frequencies for each key. */
+const DTMF_HZ: Record<string, readonly [number, number]> = {
+  '1': [697, 1209],
+  '2': [697, 1336],
+  '3': [697, 1477],
+  A: [697, 1633],
+  '4': [770, 1209],
+  '5': [770, 1336],
+  '6': [770, 1477],
+  B: [770, 1633],
+  '7': [852, 1209],
+  '8': [852, 1336],
+  '9': [852, 1477],
+  C: [852, 1633],
+  '*': [941, 1209],
+  '0': [941, 1336],
+  '#': [941, 1477],
+  D: [941, 1633],
+};
+/** Q.24 asks for at least 40 ms of tone and pause; this leaves margin. */
+const DTMF_TONE_MS = 120;
+const DTMF_GAP_MS = 80;
+
+/**
+ * One keypress as audio (two tones, then a pause), μ-law. The human-call
+ * relay plays the caller's keys to the interpreter line this way, since a
+ * media stream cannot send key events. Unknown keys give silence.
+ */
+export function dtmfTone(key: string): Uint8Array {
+  const [low, high] = DTMF_HZ[key] ?? [0, 0];
+  const toneLength = (TELEPHONY_RATE_HZ * DTMF_TONE_MS) / 1000;
+  const pcm = new Int16Array(
+    toneLength + (TELEPHONY_RATE_HZ * DTMF_GAP_MS) / 1000,
+  );
+  for (let i = 0; low > 0 && i < toneLength; i++) {
+    // About -10 dBFS per tone: loud enough for any line, no clipping.
+    pcm[i] = Math.round(
+      0.3 *
+        32767 *
+        (Math.sin((2 * Math.PI * low * i) / TELEPHONY_RATE_HZ) +
+          Math.sin((2 * Math.PI * high * i) / TELEPHONY_RATE_HZ)) *
+        0.5,
+    );
+  }
+  return encodeMulaw(pcm);
+}

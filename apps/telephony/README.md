@@ -66,12 +66,20 @@ Twilio number ──HTTPS webhooks──► gateway: IVR  (press 1 AI / 2 human 
    - **AI → human:** `#` three times within 5 seconds closes the AI stream
      (a half-spoken turn is dropped, not translated) and the caller hears
      "Connecting you to a human interpreter… Please hold."
-   - **Human → AI:** during a human call a one-way copy of the caller's side
-     of the audio goes to the gateway (`/watch`), which only listens for `#`
-     tones in memory (never stored, never sent to FourPoints). On `###` the
-     interpreter hears "The caller has switched to the AI interpreter.
-     Goodbye." and is hung up; the caller hears "Switching you to the AI
-     interpreter." and the language menu.
+   - **Human → AI:** a human call to a company's own interpreter line is
+     **relayed through the gateway** (`relay.ts`): the caller's call opens a
+     two-way stream (`/relay`), the gateway rings the interpreter line with
+     the Twilio REST API, that call opens a second stream (`/relay-leg`), and
+     the gateway passes the audio between them unchanged, in memory only.
+     The gateway therefore sees the caller's keys: on `###` the interpreter
+     hears "The caller has switched to the AI interpreter. Goodbye." and is
+     hung up; the caller hears "Switching you to the AI interpreter." and
+     the language menu. Other keys are played to the interpreter line as
+     tones, so its own menu still works. `HUMAN_RELAY=off` goes back to
+     plain `<Dial>` (no `###` out of a human call). Calls to FourPoints'
+     own interpreters still use `<Dial>`.
+   - After the AI greeting, callers who can reach a human hear "To switch to
+     a human interpreter, press pound three times."
    - `###` rather than `000`, because callers type account numbers, PINs and
      "0 for an operator" into OPI menus. One or two `#`, and `*`, work as
      before. The human → AI direction is subject to a live test (see Known
@@ -243,10 +251,12 @@ See `.env.example` — every variable is documented there. The gateway refuses
 to start in `NODE_ENV=production` without https, wss, machine auth and
 signature validation.
 
-New for `###` human → AI: `TWILIO_ACCOUNT_CLIENT_SID` and `TWILIO_ACCOUNT_CLIENT_SECRET`
-(Console → Account → API keys & tokens → create a Standard key). Store them
-where the Auth Token is stored. Without them, `###` during a human call does
-nothing; AI → human does not need them.
+For the human-call relay: `TWILIO_ACCOUNT_CLIENT_SID` and
+`TWILIO_ACCOUNT_CLIENT_SECRET` (Console → Account → API keys & tokens →
+create a Standard key), stored where the Auth Token is stored, and
+`HUMAN_RELAY` (`company`, the default, or `off`). Without the key, or with
+`HUMAN_RELAY=off`, human calls use `<Dial>` and `###` can't leave them;
+AI → human needs neither.
 
 ## Known limits and things to confirm on the first real calls
 
@@ -259,12 +269,15 @@ nothing; AI → human does not need them.
   stream continues at `<Connect action>`. Stop FourPoints during a test call
   and confirm the caller reaches a human. The same continuation carries
   `###` from AI to human.
-- **`###` from human to AI is unverified** until a live test on an upgraded
-  Twilio number confirms: the `#` tones are present in the copied caller
-  audio (some networks send keypresses separately and Twilio may strip
-  them); redirecting the interpreter's leg ends the `<Dial>` as `completed`
-  with no `DialCallDuration`; and a real OPI line works with no
-  "Press 1 to accept".
+- **Human → AI by listening to a copy of the audio did not work** (live
+  test 2026-10-23: the copy arrived but carried no key tones), so human
+  calls on a company line are relayed instead. Still to confirm on real
+  calls: the relay's added delay, that an OPI menu accepts the keys played
+  as tones, and the cost (about $0.031/min against $0.0225/min for
+  `<Dial>`, from Twilio's US prices of August 2026).
+- The reason a relay ended is kept in the gateway's memory for
+  `/voice/relay-ended`. Helicarrier runs one instance; with several, a call
+  could land on another and be treated as unanswered.
 - An OPI menu that itself asks for `###` within 5 seconds would switch the
   caller to AI.
 

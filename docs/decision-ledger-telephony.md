@@ -343,3 +343,41 @@ Evidence: Planned tests: fourth ### ignored; AI-only and human-only
 Tradeoff: A caller who needs a fourth switch has to call again.
 Status: PROPOSED
 ```
+
+```text
+Decision ID: TELEPHONY-017
+Decision: Human calls to a company's own interpreter line are relayed through
+  the gateway instead of joined by Twilio <Dial>. The caller's call opens a
+  two-way stream (/relay); the gateway rings the interpreter line with the
+  Twilio REST API (caller ID: the company number the caller dialed), whose
+  TwiML opens a second two-way stream (/relay-leg); the gateway passes the
+  8 kHz mu-law frames between them unchanged, in memory only. The caller's
+  keys arrive as Twilio dtmf events: ### moves the caller to the AI (the
+  interpreter's leg gets the interpreter-released notice and hangs up; the
+  caller continues at <Connect action> /voice/relay-ended to the language
+  menu); every other key is played to the interpreter line as a DTMF tone so
+  its own menu keeps working. Hold music plays while the line rings (35 s).
+  The reason a relay ended is kept in the gateway's memory for
+  /voice/relay-ended (one Helicarrier instance). HUMAN_RELAY=off returns to
+  <Dial>. Calls to FourPoints' own interpreters still use <Dial>. The /watch
+  audio copy (TELEPHONY-015) is removed. After the AI greeting, callers on
+  calls where ### can reach a human hear "To switch to a human interpreter,
+  press pound three times." (English only).
+Reason: Live test 2026-10-23: the one-way copy of the caller's audio during
+  <Dial> arrived (511 frames on the inbound track) but carried no key tones
+  and no key events, so ### could not be heard. Twilio's only key feature
+  during <Dial> is hangupOnStar, a single *, which the owner rejected in
+  favour of ### both ways.
+Evidence: relay.test.ts (ringing, audio both ways, ###, keys as tones,
+  interpreter hang-up, busy/no answer, ring timeout, caller hang-up, refused
+  streams, content-free logs); ivr-company.test.ts (relay TwiML carries only
+  lang, limit and a yes/no; /voice/relay-ended outcomes).
+Tradeoff: Every company human call now depends on the gateway and adds two
+  network hops. Cost per minute (Twilio US prices, August 2026): <Dial>
+  $0.0085 in + $0.0140 out = $0.0225; relay adds two Media Streams at
+  $0.0044 = $0.0313 (about +$0.0088/min, +39%). The owner will judge
+  latency and cost on real calls and can switch it off with HUMAN_RELAY.
+  The deviation from SoT section 6 (Twilio Conference for the human path)
+  already existed with <Dial>.
+Status: PROPOSED
+```
