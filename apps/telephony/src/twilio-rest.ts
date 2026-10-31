@@ -36,6 +36,8 @@ export interface NewCall {
   twiml: string;
   /** Seconds to ring before giving up (Twilio: 5–600). */
   timeoutSeconds: number;
+  /** Twilio ends the call after this long, whatever else happens. */
+  timeLimitSeconds?: number;
 }
 
 export interface TwilioRest {
@@ -151,6 +153,9 @@ export function createTwilioRest(options: TwilioRestOptions): TwilioRest {
         From: call.from,
         Twiml: call.twiml,
         Timeout: String(Math.min(Math.max(call.timeoutSeconds, 5), 600)),
+        ...(call.timeLimitSeconds === undefined
+          ? {}
+          : { TimeLimit: String(call.timeLimitSeconds) }),
       });
       return isCallSid(body?.['sid']) ? body['sid'] : undefined;
     },

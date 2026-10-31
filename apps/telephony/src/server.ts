@@ -114,6 +114,8 @@ export async function createTelephonyServer(
   const relays = new RelayHub();
   const humanRelay =
     options.rest !== undefined && config.humanRelay === 'company';
+  /** Calls the gateway ended at their limit; memory only, like RelayHub. */
+  const aiTimedOut = new Set<string>();
   let draining = false;
   const aiAvailable = () => !draining && activeCalls < config.maxCalls;
 
@@ -195,6 +197,7 @@ export async function createTelephonyServer(
           : { companies: options.companies }),
         humanRelay,
         relayOutcome: (callSid: string) => relays.take(callSid),
+        aiTimedOut: (callSid: string) => aiTimedOut.delete(callSid),
         log,
       },
     );
@@ -316,6 +319,14 @@ export async function createTelephonyServer(
         target: options.target,
         menu: options.menu,
         ...(options.prompts === undefined ? {} : { prompts: options.prompts }),
+        onTimeLimit: (callSid) => {
+          aiTimedOut.add(callSid);
+          // Twilio answers at once; this only cleans up after a hang-up.
+          setTimeout(
+            () => aiTimedOut.delete(callSid),
+            AI_TIMED_OUT_TTL_MS,
+          ).unref();
+        },
         onEnd: () => {
           activeCalls -= 1;
         },
@@ -350,3 +361,6 @@ export async function createTelephonyServer(
     },
   };
 }
+
+/** How long an AI call's time-limit note waits for Twilio's webhook. */
+const AI_TIMED_OUT_TTL_MS = 60_000;

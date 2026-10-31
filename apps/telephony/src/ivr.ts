@@ -24,7 +24,12 @@
  * interpreter, and /voice/human-result reads out the language menu.
  */
 
-import type { AccessClient, LineResult } from './access.js';
+import {
+  retryUsage,
+  type AccessClient,
+  type LineResult,
+  type UsageEvent,
+} from './access.js';
 import type { Company, CompanySource } from './companies.js';
 import type { TelephonyConfig } from './config.js';
 import {
@@ -38,6 +43,10 @@ import type { RelayOutcome } from './relay.js';
 import { element, escapeXml, response, say } from './twiml.js';
 
 export interface IvrContext {
+  /** Waits before each repeat of a failed end report. */
+  usageRetryDelaysMs?: readonly number[];
+  /** True once, for an AI call the gateway ended at its time limit. */
+  aiTimedOut?: (callSid: string) => boolean;
   config: TelephonyConfig;
   menu: LanguageMenu;
   /** False while this instance is draining or at its AI call limit. */
@@ -137,6 +146,38 @@ interface CallGrant {
   leg: number;
   /** orgNumber of a listed company (companies.ts), for its own interpreters. */
   company: number | undefined;
+  /** The list code used, for its minute limit. */
+  codeGrant: string | undefined;
+  /** How the caller got in, for usage. */
+  codeKind: CodeKind;
+  /** The call came in on the organization's own number. */
+  dedicated: boolean;
+}
+
+type CodeKind = 'ORG' | 'EMPLOYEE' | 'GRANT' | 'NONE';
+const CODE_KINDS: readonly string[] = ['ORG', 'EMPLOYEE', 'GRANT', 'NONE'];
+const E164 = /^\+[0-9]{6,15}$/;
+
+const STREAM_ENDED = new Set(['stream-stopped', 'stream-error']);
+
+/**
+ * What the interpreter call really lasted. Twilio gives DialCallDuration only
+ * for an answered call, so anything else was ringing, which is not billed.
+ */
+function dialDuration(body: URLSearchParams): number | undefined {
+  const status = body.get('DialCallStatus');
+  if (status === null) {
+    return undefined;
+  }
+  const seconds = Number(body.get('DialCallDuration'));
+  if (status === 'completed' || status === 'answered') {
+    return body.has('DialCallDuration') &&
+      Number.isInteger(seconds) &&
+      seconds >= 0
+      ? seconds
+      : undefined;
+  }
+  return 0;
 }
 
 function readGrant(query: URLSearchParams): CallGrant | undefined {
@@ -146,6 +187,8 @@ function readGrant(query: URLSearchParams): CallGrant | undefined {
   }
   const emp = query.get('emp');
   const company = Number(query.get('co'));
+  const grantId = query.get('cg');
+  const codeKind = query.get('ck') ?? '';
   return {
     org,
     emp: emp !== null && GUID.test(emp) ? emp : undefined,
@@ -154,6 +197,9 @@ function readGrant(query: URLSearchParams): CallGrant | undefined {
     minutes: Math.max(Number(query.get('min')) || 0, 0),
     leg: Math.min(Math.max(Number(query.get('leg')) || 0, 0), 20),
     company: Number.isInteger(company) && company >= 10 ? company : undefined,
+    codeGrant: grantId !== null && GUID.test(grantId) ? grantId : undefined,
+    codeKind: CODE_KINDS.includes(codeKind) ? (codeKind as CodeKind) : 'NONE',
+    dedicated: query.get('ln') === '1',
   };
 }
 
@@ -243,6 +289,9 @@ export async function handleVoiceWebhook(
             min: grant.minutes,
             leg: grant.leg,
             co: grant.company,
+            cg: grant.codeGrant,
+            ck: grant.codeKind,
+            ln: grant.dedicated ? 1 : undefined,
           };
     for (const [key, value] of Object.entries({
       ...carried,
@@ -373,7 +422,10 @@ export async function handleVoiceWebhook(
           { action: url('/voice/relay-ended', { lang: entry?.languageId }) },
           element(
             'Stream',
-            { url: `${config.publicBaseUrl.replace(/^http/, 'ws')}/relay` },
+            {
+              url: `${config.publicBaseUrl.replace(/^http/, 'ws')}/relay`,
+              statusCallback: url('/voice/stream-status', { end: 'HUMAN' }),
+            },
             ...(entry === undefined
               ? []
               : [
@@ -461,6 +513,15 @@ export async function handleVoiceWebhook(
             name: 'patientLanguageId',
             value: entry.languageId,
           }),
+          // Never past the minutes left. A number only.
+          ...(grant === undefined
+            ? []
+            : [
+                element('Parameter', {
+                  name: 'limit',
+                  value: String(Math.max(grant.minutes, 1) * 60),
+                }),
+              ]),
           // ### may go to a human. A yes/no only: never the organization.
           ...(intro === undefined && canSwitch() && canHuman()
             ? [element('Parameter', { name: 'transfer', value: '1' })]
@@ -496,6 +557,9 @@ export async function handleVoiceWebhook(
       return true;
     }
     const leg = grant.leg + 1;
+    // Withheld numbers come as words such as "anonymous": sent as no number.
+    const from = body.get('From') ?? '';
+    const to = body.get('To') ?? '';
     if (ctx.access === undefined || !CALL_SID.test(callSid)) {
       log('usage.unrecorded', { mode });
     } else {
@@ -505,6 +569,13 @@ export async function handleVoiceWebhook(
         leg,
         organizationId: grant.org,
         ...(grant.emp === undefined ? {} : { employeeId: grant.emp }),
+        ...(grant.codeGrant === undefined
+          ? {}
+          : { codeGrantId: grant.codeGrant }),
+        lineKind: grant.dedicated ? 'DEDICATED' : 'SHARED',
+        codeKind: grant.codeKind,
+        ...(E164.test(from) ? { from } : {}),
+        ...(E164.test(to) ? { to } : {}),
         mode,
         ...(entry === undefined ? {} : { languageId: entry.languageId }),
       });
@@ -518,7 +589,10 @@ export async function handleVoiceWebhook(
     grant = { ...grant, leg };
     return true;
   };
-  const endLeg = async (mode: 'AI' | 'HUMAN'): Promise<void> => {
+  const endLeg = async (
+    mode: 'AI' | 'HUMAN',
+    durationSeconds?: number,
+  ): Promise<void> => {
     if (
       grant === undefined ||
       grant.leg === 0 ||
@@ -527,15 +601,27 @@ export async function handleVoiceWebhook(
     ) {
       return;
     }
-    const result = await ctx.access.usage({
+    const event: UsageEvent = {
       event: 'end',
       callSid,
       leg: grant.leg,
       organizationId: grant.org,
       mode,
-    });
-    if (result !== 'recorded') {
-      log('usage.end_failed', { mode });
+      ...(durationSeconds === undefined ? {} : { durationSeconds }),
+    };
+    const result = await ctx.access.usage(event);
+    if (result === 'recorded') {
+      return;
+    }
+    log('usage.end_failed', { mode });
+    if (result === 'error') {
+      // In the background: Twilio is waiting for this webhook's answer.
+      void retryUsage(ctx.access, event, ctx.usageRetryDelaysMs).then(
+        (retried) =>
+          log(retried === 'recorded' ? 'usage.end_retried' : 'usage.end_lost', {
+            mode,
+          }),
+      );
     }
   };
 
@@ -645,7 +731,7 @@ export async function handleVoiceWebhook(
         },
         ...speak(...lead, [
           'code-prompt',
-          'Please enter your six digit access code, then press pound.',
+          'Please enter your access code, then press pound.',
         ]),
       ),
     );
@@ -705,7 +791,7 @@ export async function handleVoiceWebhook(
     if (
       !Number.isInteger(orgNumber) ||
       orgNumber < 10 ||
-      !/^\d{6}$/.test(code)
+      !/^(\d{6}|\d{8})$/.test(code)
     ) {
       return notRecognized();
     }
@@ -755,6 +841,13 @@ export async function handleVoiceWebhook(
         listed?.organizationId === result.organizationId
           ? orgNumber
           : undefined,
+      codeGrant: result.codeGrantId ?? undefined,
+      codeKind: result.codeGrantId
+        ? 'GRANT'
+        : result.employeeId
+          ? 'EMPLOYEE'
+          : 'ORG',
+      dedicated: query.get('dl') === '1',
     };
     return afterAccess();
   };
@@ -802,6 +895,9 @@ export async function handleVoiceWebhook(
       minutes: result.minutesRemaining,
       leg: 0,
       company: listed.orgNumber,
+      codeGrant: undefined,
+      codeKind: 'NONE',
+      dedicated: true,
     };
     return afterAccess(companyWelcome(listed));
   };
@@ -949,6 +1045,12 @@ export async function handleVoiceWebhook(
 
     case '/voice/ai-ended':
       await endLeg('AI');
+      if (ctx.aiTimedOut?.(callSid) === true) {
+        return goodbye(
+          'time-limit',
+          'Your interpretation minutes for this call have ended.',
+        );
+      }
       // The caller hanging up ends everything; any other end means the
       // gateway closed the stream: the caller pressed ###, or the backend
       // is unavailable or at capacity. This route cannot tell which, so the
@@ -961,7 +1063,7 @@ export async function handleVoiceWebhook(
       return human(language);
 
     case '/voice/human-result':
-      await endLeg('HUMAN');
+      await endLeg('HUMAN', dialDuration(body));
       if (body.get('DialCallStatus') === 'completed') {
         return response(element('Hangup'));
       }
@@ -1022,8 +1124,15 @@ export async function handleVoiceWebhook(
     case '/voice/whisper-accept':
       return digits === '1' ? response() : response(element('Hangup'));
 
-    case '/voice/status':
     case '/voice/stream-status':
+      // Twilio reports this apart from the <Connect> action, so one of the
+      // two can be lost and the leg still ends. Ending twice does nothing.
+      if (STREAM_ENDED.has(body.get('StreamEvent') ?? '')) {
+        await endLeg(query.get('end') === 'HUMAN' ? 'HUMAN' : 'AI');
+      }
+      return response();
+
+    case '/voice/status':
       return response();
 
     default:

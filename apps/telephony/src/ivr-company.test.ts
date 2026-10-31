@@ -144,7 +144,7 @@ describe('a company number', () => {
       { access: fakeAccess({ outcome: 'CODE_REQUIRED' }).access },
     );
     expect(twiml).toContain(
-      'Welcome to Acme Health. Please enter your six digit access code, then press pound.',
+      'Welcome to Acme Health. Please enter your access code, then press pound.',
     );
     expect(twiml).not.toContain('organization ID');
     expect(actionOf(twiml, '/voice/org/code')).toEqual({
@@ -163,7 +163,7 @@ describe('a company number', () => {
       { access: f.access },
     );
     expect(retry).toContain(
-      'Sorry, that access code was not recognized. Please enter your six digit access code',
+      'Sorry, that access code was not recognized. Please enter your access code',
     );
     expect(actionOf(retry, '/voice/org/code')).toEqual({
       n: '123',
@@ -451,7 +451,8 @@ describe('### between AI and human', () => {
     expect(twiml).toContain(
       'Connecting you to a human interpreter. Please hold.',
     );
-    expect(twiml).toContain('<Stream url="wss://phone.example.com/relay">');
+    expect(twiml).toContain('<Stream url="wss://phone.example.com/relay"');
+    expect(twiml).toContain('end=HUMAN');
     expect(twiml).toContain('<Parameter name="lang" value="es-US"/>');
     expect(twiml).toContain('<Parameter name="limit" value="2520"/>');
     expect(twiml).toContain('<Parameter name="switch" value="1"/>');

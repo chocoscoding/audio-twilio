@@ -58,6 +58,8 @@ const MUSIC_LEAD_MS = 1_000;
 const DIGIT_PAUSE_MS = 1_000;
 /** The interpreter's leg must re-join within this after sending keys. */
 const REJOIN_TIMEOUT_MS = 15_000;
+const HANG_UP_ATTEMPTS = 3;
+const HANG_UP_RETRY_MS = 3_000;
 /** Keys Twilio <Play digits> can send. */
 const SENDABLE = /^[0-9*#]$/;
 /** Ringing call states that mean nobody will answer. */
@@ -75,6 +77,7 @@ export interface RelayTiming {
   pollMs: number;
   digitPauseMs: number;
   rejoinTimeoutMs: number;
+  hangUpRetryMs: number;
 }
 
 const DEFAULT_TIMING: RelayTiming = {
@@ -83,7 +86,11 @@ const DEFAULT_TIMING: RelayTiming = {
   pollMs: POLL_MS,
   digitPauseMs: DIGIT_PAUSE_MS,
   rejoinTimeoutMs: REJOIN_TIMEOUT_MS,
+  hangUpRetryMs: HANG_UP_RETRY_MS,
 };
+
+/** Past the caller's own limit: the relay should have hung up by then. */
+const LEG_LIMIT_MARGIN_SECONDS = 60;
 
 type Json = Record<string, unknown>;
 
@@ -218,6 +225,24 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
     timers.push(setTimeout(work, ms));
   };
 
+  /**
+   * Hang up the interpreter's leg. A failed attempt is repeated, because
+   * otherwise that call runs on with nobody on the caller's side. Not one of
+   * `timers`: those are cleared when the relay finishes, and this must not be.
+   */
+  const hangUp = (sid: string, attempt = 1) => {
+    void rest.endCall(sid).then((ended) => {
+      if (ended) {
+        return;
+      }
+      if (attempt >= HANG_UP_ATTEMPTS) {
+        log('relay.hangup_failed', { call: callId });
+        return;
+      }
+      setTimeout(() => hangUp(sid, attempt + 1), timing.hangUpRetryMs);
+    });
+  };
+
   /** End the relay; the caller's call continues at <Connect action>. */
   const finish = (reason: string, outcome?: RelayOutcome) => {
     if (phase === 'done') {
@@ -319,7 +344,7 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
     if (limitMs > 0) {
       later(limitMs, () => {
         if (legSid !== undefined) {
-          void rest.endCall(legSid);
+          hangUp(legSid);
         }
         finish('time_limit', 'time_limit');
       });
@@ -418,7 +443,7 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
     later(timing.ringTimeoutMs, () => {
       if (phase === 'ringing') {
         if (legSid !== undefined) {
-          void rest.endCall(legSid);
+          hangUp(legSid);
         }
         finish('ring_timeout', 'no_answer');
       }
@@ -428,11 +453,15 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
       from: calledNumber,
       twiml: legTwiml(),
       timeoutSeconds: Math.ceil(timing.ringTimeoutMs / 1000) - 5,
+      // A backstop if the hang-up below never reaches Twilio.
+      ...(limitMs > 0
+        ? { timeLimitSeconds: limitMs / 1000 + LEG_LIMIT_MARGIN_SECONDS }
+        : {}),
     });
     if (phase !== 'ringing') {
       // The caller left, or switched, while the call was being placed.
       if (legSid !== undefined) {
-        void rest.endCall(legSid);
+        hangUp(legSid);
       }
       return;
     }
@@ -560,7 +589,7 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
       }
       case 'stop':
         if (legSid !== undefined) {
-          void rest.endCall(legSid);
+          hangUp(legSid);
         }
         finish('caller_left');
         break;
@@ -570,7 +599,7 @@ export function runRelayCaller(caller: WebSocket, options: RelayOptions): void {
   });
   caller.on('close', () => {
     if (phase !== 'done' && legSid !== undefined) {
-      void rest.endCall(legSid);
+      hangUp(legSid);
     }
     finish('caller_closed');
   });

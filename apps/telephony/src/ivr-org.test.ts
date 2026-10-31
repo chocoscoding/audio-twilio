@@ -123,7 +123,7 @@ describe('organization line', () => {
       { Digits: '010' },
     );
     expect(second).toContain(
-      'Please enter your six digit access code, then press pound.',
+      'Please enter your access code, then press pound.',
     );
     // Both entries end on pound (no digit count), so the caller's pound is
     // used up there and never reaches the next menu.
@@ -298,6 +298,8 @@ describe('organization line', () => {
         employeeId: EMP,
         mode: 'AI',
         languageId: 'es-US',
+        lineKind: 'SHARED',
+        codeKind: 'NONE',
       },
     ]);
     // The organization never goes into the media stream.
@@ -320,6 +322,182 @@ describe('organization line', () => {
       organizationId: ORG,
       mode: 'AI',
     });
+  });
+
+  it('accepts an 8-digit list code and reports it, with the two numbers', async () => {
+    const GRANT_ID = '99999999-8888-4777-8666-555555555555';
+    const f = fakeAccess({ ...OK, employeeId: null, codeGrantId: GRANT_ID });
+    const menuTwiml = await hook(
+      '/voice/org/code',
+      { n: '10' },
+      { Digits: '12345678' },
+      { access: f.access },
+    );
+    expect(f.resolved).toEqual([[10, '12345678']]);
+    expect(firstAction(menuTwiml)).toMatchObject({ cg: GRANT_ID, ck: 'GRANT' });
+    await hook(
+      '/voice/select',
+      {
+        ...GRANT,
+        cg: GRANT_ID,
+        ck: 'GRANT',
+        mode: 'ai',
+        v: menu.version,
+        attempt: '1',
+      },
+      { Digits: '1', From: '+15550100123', To: '+18723047712' },
+      { access: f.access },
+    );
+    expect(f.events[0]).toMatchObject({
+      event: 'start',
+      codeGrantId: GRANT_ID,
+      codeKind: 'GRANT',
+      lineKind: 'SHARED',
+      from: '+15550100123',
+      to: '+18723047712',
+    });
+  });
+
+  it.each(['12345', '1234567', '123456789'])(
+    'refuses %s without asking FourPoints',
+    async (Digits) => {
+      const f = fakeAccess(OK);
+      await hook(
+        '/voice/org/code',
+        { n: '10' },
+        { Digits },
+        { access: f.access },
+      );
+      expect(f.resolved).toEqual([]);
+    },
+  );
+
+  it('sends no caller number when it is withheld', async () => {
+    const f = fakeAccess(OK);
+    await hook(
+      '/voice/select',
+      { ...GRANT, mode: 'ai', v: menu.version, attempt: '1' },
+      { Digits: '1', From: 'anonymous', To: '+18723047712' },
+      { access: f.access },
+    );
+    expect(f.events[0]).not.toHaveProperty('from');
+    expect(f.events[0]).toMatchObject({ to: '+18723047712' });
+  });
+
+  it('never logs either number', async () => {
+    const logged: unknown[] = [];
+    await hook(
+      '/voice/select',
+      { ...GRANT, mode: 'ai', v: menu.version, attempt: '1' },
+      { Digits: '1', From: '+15550100123', To: '+18723047712' },
+      {
+        access: fakeAccess(OK).access,
+        log: (...args) => logged.push(args),
+      },
+    );
+    expect(JSON.stringify(logged)).not.toMatch(/5550100123|8723047712/);
+  });
+
+  it('puts the time limit on an AI call and says goodbye when it is reached', async () => {
+    const f = fakeAccess(OK);
+    const twiml = await hook(
+      '/voice/select',
+      { ...GRANT, mode: 'ai', v: menu.version, attempt: '1' },
+      { Digits: '1' },
+      { access: f.access },
+    );
+    expect(twiml).toContain('<Parameter name="limit" value="');
+    const ended = await hook(
+      '/voice/ai-ended',
+      { ...GRANT, leg: '1', lang: 'es-US' },
+      { CallStatus: 'in-progress' },
+      { access: f.access, aiTimedOut: () => true },
+    );
+    expect(ended).toContain(
+      'Your interpretation minutes for this call have ended.',
+    );
+    expect(ended).toContain('<Hangup/>');
+    expect(ended).not.toContain('<Dial');
+  });
+
+  it('ends the leg from the stream status too, once the stream stops', async () => {
+    const f = fakeAccess(OK);
+    await hook(
+      '/voice/stream-status',
+      { ...GRANT, leg: '2' },
+      { StreamEvent: 'stream-started' },
+      { access: f.access },
+    );
+    expect(f.events).toEqual([]);
+    await hook(
+      '/voice/stream-status',
+      { ...GRANT, leg: '2' },
+      { StreamEvent: 'stream-stopped' },
+      { access: f.access },
+    );
+    expect(f.events).toEqual([
+      {
+        event: 'end',
+        callSid: CALL,
+        leg: 2,
+        organizationId: ORG,
+        mode: 'AI',
+      },
+    ]);
+  });
+
+  it('a relayed human stream ends as a human leg', async () => {
+    const f = fakeAccess(OK);
+    await hook(
+      '/voice/stream-status',
+      { ...GRANT, leg: '2', end: 'HUMAN' },
+      { StreamEvent: 'stream-error' },
+      { access: f.access },
+    );
+    expect(f.events[0]).toMatchObject({ event: 'end', mode: 'HUMAN' });
+  });
+
+  it("reports Twilio's duration of an answered human call", async () => {
+    const f = fakeAccess(OK);
+    await hook(
+      '/voice/human-result',
+      { ...GRANT, leg: '2' },
+      { DialCallStatus: 'completed', DialCallDuration: '125' },
+      { access: f.access },
+    );
+    expect(f.events[0]).toMatchObject({ mode: 'HUMAN', durationSeconds: 125 });
+  });
+
+  it.each(['no-answer', 'busy', 'failed', 'canceled'])(
+    'a human call that was never answered bills no ringing (%s)',
+    async (status) => {
+      const f = fakeAccess(OK);
+      await hook(
+        '/voice/human-result',
+        { ...GRANT, leg: '2' },
+        { DialCallStatus: status },
+        { access: f.access },
+      );
+      expect(f.events[0]).toMatchObject({ durationSeconds: 0 });
+    },
+  );
+
+  it('repeats a failed end report in the background until it lands', async () => {
+    const f = fakeAccess(OK, 'error');
+    const logged: string[] = [];
+    await hook(
+      '/voice/ai-ended',
+      { ...GRANT, leg: '1' },
+      { CallStatus: 'completed' },
+      {
+        access: f.access,
+        log: (e) => logged.push(e),
+        usageRetryDelaysMs: [1, 1, 1],
+      },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(f.events).toHaveLength(4);
+    expect(logged).toEqual(['usage.end_failed', 'usage.end_lost']);
   });
 
   it('caps a human call at the minutes left and counts it as its own leg', async () => {

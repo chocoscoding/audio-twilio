@@ -212,7 +212,12 @@ const FIXED = [
   line(
     'code-prompt',
     'org',
-    'Please enter your six digit access code, then press pound.',
+    'Please enter your access code, then press pound.',
+  ),
+  line(
+    'time-limit',
+    'org',
+    'Your interpretation minutes for this call have ended.',
   ),
   line(
     'code-not-recognized',

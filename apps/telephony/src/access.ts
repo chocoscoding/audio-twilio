@@ -22,6 +22,8 @@ export type ResolveResult =
       outcome: 'OK';
       organizationId: string;
       employeeId: string | null;
+      /** A list code (8 digits); null for any other way in. */
+      codeGrantId?: string | null;
       aiAllowed: boolean;
       humanAllowed: boolean;
       minutesRemaining: number;
@@ -45,6 +47,12 @@ export type UsageEvent =
       leg: number;
       organizationId: string;
       employeeId?: string;
+      codeGrantId?: string;
+      lineKind?: 'SHARED' | 'DEDICATED';
+      codeKind?: 'ORG' | 'EMPLOYEE' | 'GRANT' | 'NONE';
+      /** The two numbers, from Twilio's signed request. Never logged. */
+      from?: string;
+      to?: string;
       mode: 'AI' | 'HUMAN';
       languageId?: string;
     }
@@ -54,6 +62,8 @@ export type UsageEvent =
       leg: number;
       organizationId: string;
       mode: 'AI' | 'HUMAN';
+      /** Twilio's measure of the leg, when it gives one. */
+      durationSeconds?: number;
     };
 
 /** `refused`: the organization can no longer use the line (e.g. paused). */
@@ -92,6 +102,29 @@ function checkOutcome(
 }
 
 const LINE_OUTCOMES = new Set([...OUTCOMES, 'CODE_REQUIRED']);
+
+/**
+ * An end report that failed is tried again a few times, so a short FourPoints
+ * outage does not leave the leg open. Ending is idempotent there. Delays are
+ * short of a restart's reach: a report lost to a restart stays lost.
+ */
+export const USAGE_RETRY_DELAYS_MS = [1_000, 5_000, 20_000] as const;
+
+export async function retryUsage(
+  access: AccessClient,
+  event: UsageEvent,
+  delaysMs: readonly number[] = USAGE_RETRY_DELAYS_MS,
+): Promise<UsageResult> {
+  let result: UsageResult = 'error';
+  for (const delayMs of delaysMs) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    result = await access.usage(event);
+    if (result !== 'error') {
+      return result;
+    }
+  }
+  return result;
+}
 
 export function createAccessClient(
   apiBaseUrl: string,

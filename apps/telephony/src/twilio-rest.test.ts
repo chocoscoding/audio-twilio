@@ -89,6 +89,20 @@ describe('createTwilioRest()', () => {
     );
   });
 
+  it('passes a time limit to Twilio when given one', async () => {
+    const f = fakeFetch(() => json({ sid: LEG, status: 'queued' }));
+    await client(f.fetchImpl).createCall({
+      to: '+14342483776',
+      from: '+18723047712',
+      twiml: TWIML,
+      timeoutSeconds: 30,
+      timeLimitSeconds: 660,
+    });
+    expect(new URLSearchParams(f.requests[0]?.body).get('TimeLimit')).toBe(
+      '660',
+    );
+  });
+
   it('places a call with inline TwiML and a bounded ring time', async () => {
     const f = fakeFetch(() => json({ sid: LEG, status: 'queued' }));
     expect(

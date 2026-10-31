@@ -181,12 +181,12 @@
       "file": "code-prompt.wav",
       "kind": "speech",
       "group": "org",
-      "text": "Please enter your six digit access code, then press pound.",
-      "durationMs": 3946,
-      "hash": "6a9c1b846d25a58d",
+      "text": "Please enter your access code, then press pound.",
+      "durationMs": 3323,
+      "hash": "0a678428dba6a265",
       "voiceId": "WqfqZq3UXPCD87IXHLnm",
       "modelId": "eleven_v4",
-      "approvedAt": "2026-10-13T04:32:02.301Z"
+      "approvedAt": "2026-10-31T13:36:28.313Z"
     },
     "goodbye": {
       "file": "goodbye.wav",
@@ -670,6 +670,17 @@
       "voiceId": "WqfqZq3UXPCD87IXHLnm",
       "modelId": "eleven_v4",
       "approvedAt": "2026-10-13T04:32:02.507Z"
+    },
+    "time-limit": {
+      "file": "time-limit.wav",
+      "kind": "speech",
+      "group": "org",
+      "text": "Your interpretation minutes for this call have ended.",
+      "durationMs": 2975,
+      "hash": "0afb07a3d862f3dd",
+      "voiceId": "WqfqZq3UXPCD87IXHLnm",
+      "modelId": "eleven_v4",
+      "approvedAt": "2026-10-31T13:36:28.316Z"
     },
     "welcome": {
       "file": "welcome.wav",

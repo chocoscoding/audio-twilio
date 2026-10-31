@@ -46,6 +46,8 @@ const HOLD_MUSIC_LEAD_MS = 1_000;
 /** Never wait on a greeting's mark longer than its length plus this. */
 const GREETING_MARK_SLACK_MS = 3_000;
 const GREETING_MARK = 'greeting';
+/** Twilio ends a call at 4 hours; the minutes left never exceed that. */
+const MAX_LIMIT_SECONDS = 4 * 3600;
 /**
  * Said after the AI greeting, only when ### can reach a human on this call.
  * English only; the language greetings stay as recorded.
@@ -63,6 +65,8 @@ export interface CallOptions {
   menu: () => LanguageMenu;
   /** Recorded greeting and hold music; without them the stream starts silent. */
   prompts?: PromptLibrary;
+  /** The call reached its time limit; the IVR then says goodbye. */
+  onTimeLimit?: (callSid: string) => void;
   onEnd: () => void;
 }
 
@@ -75,6 +79,7 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
   const { config } = options;
   let streamSid = '';
   let callId = 'unknown';
+  let limitTimer: ReturnType<typeof setTimeout> | undefined;
   let pair: LanguagePair | undefined;
   let session: FourPointsSession | undefined;
   let opening: Promise<boolean> | undefined;
@@ -288,6 +293,7 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
     }
     ended = true;
     clearTimeout(startTimer);
+    clearTimeout(limitTimer);
     stopHoldMusic?.();
     greetingPlayed?.();
     floor.stop();
@@ -330,6 +336,13 @@ export function runCall(twilio: WebSocket, options: CallOptions): void {
       patientLanguageId: patient.languageId,
     };
     transferAllowed = params['transfer'] === '1';
+    const limit = Number(params['limit']);
+    if (Number.isInteger(limit) && limit >= 60 && limit <= MAX_LIMIT_SECONDS) {
+      limitTimer = setTimeout(() => {
+        options.onTimeLimit?.(String(start['callSid']));
+        endStream('time_limit');
+      }, limit * 1000);
+    }
     log('call.started', {
       call: callId,
       patientLanguageId: patient.languageId,

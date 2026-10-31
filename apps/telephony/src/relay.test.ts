@@ -357,6 +357,30 @@ describe('human-call relay', () => {
     expect(hub.take(CALLER)).toBeUndefined();
   });
 
+  it('tries again when hanging up the interpreter line fails', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const { rest } = fakeRest();
+    rest.endCall.mockResolvedValueOnce(false);
+    const { caller, hub } = startCaller({ switch: '1' }, rest, new RelayHub(), {
+      hangUpRetryMs: 5,
+    });
+    await settle();
+    answer(hub);
+    caller.receive({ event: 'stop' });
+    await settle(30);
+    expect(rest.endCall).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks Twilio to end the interpreter line past the time limit', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const { rest } = fakeRest();
+    startCaller({ limit: '600' }, rest);
+    await settle();
+    expect(rest.createCall).toHaveBeenCalledWith(
+      expect.objectContaining({ timeLimitSeconds: 660 }),
+    );
+  });
+
   it('refuses a stream from another account, and a leg no caller waits for', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const { rest } = fakeRest();
